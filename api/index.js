@@ -439,6 +439,15 @@ module.exports = async (req, res) => {
       if (ro && method === 'PATCH') return send(res, 200, await research.setOpportunity(id, ro[1], (await readBody(req)).status));
       if (sub === 'identity/palettes' && method === 'POST') return send(res, 200, { palettes: await identity.palettes(id, await readBody(req)) });
       if (sub === 'identity/logos' && method === 'POST') return send(res, 200, await identity.logos(id, await readBody(req)));
+      if (sub === 'uploads' && method === 'POST') {
+        const body = await readBody(req);
+        const m = String(body.dataUrl || '').match(/^data:(image\/(png|jpeg|webp));base64,(.+)$/);
+        if (!m) throw httpError(400, 'ارفع صورة PNG أو JPG أو WEBP');
+        const buf = Buffer.from(m[3], 'base64');
+        if (buf.length > 8 * 1024 * 1024) throw httpError(400, 'حجم الصورة أكبر من 8MB');
+        const f = await store.saveFile(`uploads/${id}/${Date.now()}.${{ 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' }[m[1]]}`, buf, m[1]);
+        return send(res, 200, { url: f.url });
+      }
       const pph = sub && sub.match(/^products\/([a-z0-9]+)\/photo$/);
       if (pph && method === 'POST') return send(res, 200, await brands.productPhoto(id, pph[1], await readBody(req)));
       if (sub === 'identity/fonts' && method === 'POST') return send(res, 200, { pairings: await identity.fonts(id, await readBody(req)) });

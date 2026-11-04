@@ -201,6 +201,35 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeMen
 addEventListener('resize', closeMenu);
 addEventListener('scroll', (e) => { if (openMenuEl && e.target instanceof Node && openMenuEl.contains(e.target)) return; closeMenu(); }, true);
 
+// ---------------- drag & drop (every upload) ----------------
+const dropOf = (e) => e.target instanceof Element ? e.target.closest('.drop, [data-drop]') : null;
+document.addEventListener('dragover', (e) => {
+  if (!e.dataTransfer?.types?.includes('Files')) return;
+  e.preventDefault();
+  $$('.drop.over, [data-drop].over').forEach((x) => x !== dropOf(e) && x.classList.remove('over'));
+  const z = dropOf(e);
+  e.dataTransfer.dropEffect = z && $('input[type=file]', z) ? 'copy' : 'none';
+  z && z.classList.add('over');
+});
+document.addEventListener('dragleave', (e) => { const z = dropOf(e); if (z && !z.contains(e.relatedTarget)) z.classList.remove('over'); });
+document.addEventListener('drop', (e) => {
+  if (!e.dataTransfer?.files?.length) return;
+  e.preventDefault();
+  const z = dropOf(e);
+  $$('.drop.over, [data-drop].over').forEach((x) => x.classList.remove('over'));
+  const input = z && $('input[type=file]', z);
+  if (!input) return toast('أفلت الملف داخل خانة الرفع', true);
+  const files = [...e.dataTransfer.files];
+  const acc = (input.accept || '').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
+  const okType = (f) => !acc.length || acc.some((a) => (a.startsWith('.') ? f.name.toLowerCase().endsWith(a) : a.endsWith('/*') ? f.type.startsWith(a.slice(0, -1)) : f.type === a));
+  const good = files.filter(okType);
+  if (!good.length) return toast('نوع الملف غير مدعوم هنا', true);
+  const dt = new DataTransfer();
+  (input.multiple ? good : good.slice(0, 1)).forEach((f) => dt.items.add(f));
+  input.files = dt.files;
+  input.dispatchEvent(new Event('change', { bubbles: true }));
+});
+
 // ---------------- modal ----------------
 function modal(html, onMount) {
   closeModal();
@@ -218,7 +247,7 @@ function modal(html, onMount) {
 function closeModal() { $('#modal')?.remove(); }
 function confirmBox(title, text, okLabel = 'تأكيد', danger = false) {
   return new Promise((resolve) => {
-    modal(`<h2>${esc(title)}</h2><p class="sec mt8">${esc(text)}</p><div class="foot"><button class="btn ghost" data-no>إلغاء</button><button class="btn primary" data-yes style="${danger ? 'background:#E11D48;color:#fff' : ''}">${esc(okLabel)}</button></div>`, (m) => {
+    modal(`<h2>${esc(title)}</h2><p class="sec mt8">${esc(text)}</p><div class="foot"><button class="btn ghost" data-no>إلغاء</button><button class="btn primary" data-yes style="${danger ? 'background:#BE123C;color:#fff' : ''}">${esc(okLabel)}</button></div>`, (m) => {
       $('[data-no]', m).onclick = () => { closeModal(); resolve(false); };
       $('[data-yes]', m).onclick = () => { closeModal(); resolve(true); };
     });
@@ -560,6 +589,23 @@ const readImage = (file, max = 5) => new Promise((ok, no) => {
   if (file.size > max * 1024 * 1024) return no(new Error(`حجم الصورة أكبر من ${max}MB`));
   const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = () => no(new Error('تعذّرت قراءة الملف')); r.readAsDataURL(file);
 });
+// Product without a photo: upload it right here (saved to the Brand Brain), then continue.
+function productPhotoModal(prod, onDone) {
+  let photo = null;
+  modal(`<h2>صورة المنتج مطلوبة</h2>
+    <p class="muted sm mt8">لتصميم صورة لـ <b>${esc(prod.name)}</b> نحتاج صورته الحقيقية كمرجع، حتى يُظهر الذكاء الاصطناعي نفس المنتج بالضبط ولا يخترع منتجاً آخر. ستُحفظ أيضاً في عقل البراند ← المنتجات.</p>
+    <label class="drop mt12" style="display:block;padding:18px"><span id="ppmv">${ic('upload')}<div class="mt8"><b>ارفع صورة المنتج</b></div><div class="xs">PNG / JPG / WEBP · خلفية بسيطة أفضل · حتى 5MB</div></span><input type="file" id="ppmf" accept="image/png,image/jpeg,image/webp" hidden></label>
+    ${S.brand.products.some((p) => p.photo && p.id !== prod.id) ? `<p class="xs muted mt12">أو استعمل صورة منتج آخر محفوظ:</p><div class="flex wrap mt8" style="gap:8px">${S.brand.products.filter((p) => p.photo && p.id !== prod.id).slice(0, 8).map((p) => `<button class="btn grey sm" data-usep="${p.id}" style="height:auto;padding:6px"><img src="${esc(p.photo)}" alt="${esc(p.name)}" style="width:40px;height:40px;object-fit:cover;border-radius:8px"><span class="xs">${esc(p.name)}</span></button>`).join('')}</div>` : ''}
+    <div class="foot"><button class="btn ghost" data-x>إلغاء</button><button class="btn primary" id="ppms" data-busy="يحفظ…" disabled>${ic('check')}احفظ وتابع التصميم</button></div>`, (m) => {
+    $('[data-x]', m).onclick = closeModal;
+    $('#ppmf', m).onchange = async (e) => { try { photo = await readImage(e.target.files[0]); $('#ppmv', m).innerHTML = `<img src="${photo}" alt="" style="max-height:160px;border-radius:12px">`; $('#ppms', m).disabled = false; } catch (err) { toast(err.message, true); } };
+    const save = async (dataUrl) => { S.brand = await api(`/api/brands/${S.brand.id}/products/${prod.id}/photo`, { method: 'POST', body: { dataUrl } }); closeModal(); toast('حُفظت صورة المنتج'); onDone && onDone(); };
+    $('#ppms', m).onclick = () => busy($('#ppms', m), async () => { try { await save(photo); } catch (err) { toast(err.message, true); } });
+    $$('[data-usep]', m).forEach((x) => (x.onclick = () => busy(x, async () => {
+      try { const src = S.brand.products.find((p) => p.id === x.dataset.usep).photo; const blob = await (await fetch(src)).blob(); const dataUrl = await new Promise((ok) => { const r = new FileReader(); r.onload = () => ok(r.result); r.readAsDataURL(blob); }); await save(dataUrl); } catch (err) { toast(err.message, true); }
+    })));
+  });
+}
 function productModal(x) {
   const b = S.brand;
   let photo = null;
@@ -593,7 +639,7 @@ function guideCard(b) {
       <div><textarea class="field" id="gtext" data-mic rows="5" placeholder="أو الصق نص الدليل هنا…"></textarea><div class="flex mt8" style="justify-content:flex-end"><button class="btn primary sm" id="gpaste" data-busy="يقرأ الدليل…">${ic('sparkle')}تحليل النص</button></div></div>
     </div></div>`;
   return `<div class="card s12"><div class="card-h"><h3>دليل الهوية البصرية</h3><div class="end">${chip('مطبّق على كل التوليدات', 'em')}<span class="muted xs">${esc(g.source)} · ${rel(g.at)}</span>
-      <label class="btn grey sm" style="cursor:pointer">${ic('refresh')}تحديث<input type="file" id="gfile" accept=".pdf,.md,.markdown,.txt,.json,.css,application/pdf,text/*" hidden></label><button class="btn grey icon sm" id="gdel" aria-label="حذف الدليل">${ic('trash')}</button></div></div>
+      <label class="btn grey sm" data-drop style="cursor:pointer">${ic('refresh')}تحديث<input type="file" id="gfile" accept=".pdf,.md,.markdown,.txt,.json,.css,application/pdf,text/*" hidden></label><button class="btn grey icon sm" id="gdel" aria-label="حذف الدليل">${ic('trash')}</button></div></div>
     <p class="sm">${esc(g.summary)}</p>
     ${g.colors.length ? `<span class="lbl">الألوان</span><div class="flex wrap" style="gap:10px">${g.colors.map((c) => `<div class="flex" style="gap:8px;min-width:200px"><span class="swatch" style="background:${c.hex};width:34px;height:34px;cursor:default"></span><div><b class="xs">${esc(c.name || c.hex)}</b> <span class="mono xs ltr muted">${c.hex}</span><div class="xs muted">${esc(c.use || '')}</div></div></div>`).join('')}</div>` : ''}
     ${g.fonts.length ? `<span class="lbl">الخطوط</span><div class="flex wrap">${g.fonts.map((f) => chip(`${f.name}${f.use ? ' · ' + f.use : ''}`, '', false)).join('')}</div>` : ''}
@@ -1054,7 +1100,7 @@ PAGES.api = async () => {
       <div class="card"><div class="card-h"><h3>خط المنصة</h3><div class="end">${chip('Thmanyah Sans', '', false)}</div></div>
         <p class="muted xs">ارفع ملفات الخط (OTF/WOFF). الوزن يُعرف من اسم الملف: Light, Regular, Medium, Bold, Black. يُعرض بـ font-display: swap.</p>
         <div class="flex wrap mt8" id="fw"></div>
-        <label class="btn grey sm mt12" style="cursor:pointer">${ic('upload')}رفع ملفات الخط<input type="file" id="fontIn" accept=".otf,.ttf,.woff,.woff2" multiple hidden></label></div>
+        <label class="btn grey sm mt12" data-drop style="cursor:pointer">${ic('upload')}رفع ملفات الخط<input type="file" id="fontIn" accept=".otf,.ttf,.woff,.woff2" multiple hidden></label></div>
       <div class="card"><div class="card-h"><h3>الاستخدام حسب المزوّد</h3></div><div class="rows">
         ${Object.entries(s.usage).map(([p, u]) => `<div class="row-i"><div class="t"><b>${esc(NAMES[p] || p)}</b><small>${fmt(u.calls)} طلب · ${fmt(u.errors)} خطأ · متوسط ${fmt(u.calls ? u.ms / u.calls : 0)}ms</small></div><span class="xs tnum muted">${u.inTok + u.outTok ? short(u.inTok + u.outTok) + ' tok' : u.chars ? short(u.chars) + ' حرف' : ''}</span></div>`).join('') || '<p class="muted sm">لا يوجد استخدام بعد</p>'}
       </div></div>
@@ -1462,6 +1508,10 @@ function drawBatch() {
         $$('[data-q]', m).forEach((q) => (q.onclick = () => { const t = $('#rf'); t.value = (t.value ? t.value + '، ' : '') + q.dataset.q; }));
         $('#rs').onclick = () => busy($('#rs'), async () => { try { const n = await api(url(it) + '/rewrite', { method: 'POST', body: { feedback: $('#rf').value, ai: aiOf('text') } }); closeModal(); replace(n); toast('تمت إعادة الكتابة'); } catch (err) { toast(err.message, true); } });
       });
+      if (a === 'image') {
+        const prod = S.brand.products.find((p) => p.id === bt.params?.productId);
+        if (prod && !prod.photo) return productPhotoModal(prod, () => btn.isConnected && btn.click());
+      }
       if (a === 'image') return busy(btn, async () => {
         try {
           const aspect = ['tiktok', 'snapchat'].includes(it.platform) || ['reel', 'story', 'ugc'].includes(it.type) ? '9:16' : it.platform === 'instagram' ? '4:5' : it.platform === 'x' || it.platform === 'youtube' || it.platform === 'linkedin' ? '16:9' : '1:1';
@@ -1569,7 +1619,7 @@ function drawStudio() {
     <div class="card s5"><div class="card-h"><h3>صورة جديدة</h3></div>
       <span class="lbl" style="margin-top:0">${KIND_L.image}</span>${pickerHTML('image')}
       <span class="lbl">المنتج في الصورة</span><div class="sel"><button class="sel-btn" id="iprod" data-menu><span class="lab">${(() => { const p = b.products.find((x) => x.id === g.productId); return p ? `${p.photo ? `<img src="${esc(p.photo)}" alt="" style="width:22px;height:22px;border-radius:6px;object-fit:cover;vertical-align:middle;margin-inline-end:6px">` : ''}${esc(p.name)}` : 'بدون منتج محدد'; })()}</span>${ic('chev')}</button></div>
-      ${(() => { const p = b.products.find((x) => x.id === g.productId); return p && !p.photo ? `<p class="xs mt8" style="color:var(--t-ro)">هذا المنتج بلا صورة. أضفها من عقل البراند ← المنتجات حتى يظهر المنتج الحقيقي.</p>` : p ? '<p class="hint mt8">صورة المنتج تُرسل كمرجع: سيظهر نفس المنتج بالضبط.</p>' : ''; })()}
+      ${(() => { const p = b.products.find((x) => x.id === g.productId); return p && !p.photo ? `<label class="drop mt8" style="display:block;padding:12px">${ic('upload')}<div class="sm mt8"><b>هذا المنتج بلا صورة: ارفعها هنا</b></div><div class="xs">تُحفظ في عقل البراند وتُستعمل كمرجع لنفس المنتج</div><input type="file" id="iprodf" accept="image/png,image/jpeg,image/webp" hidden></label>` : p ? '<p class="hint mt8">صورة المنتج تُرسل كمرجع: سيظهر نفس المنتج بالضبط.</p>' : ''; })()}
       <div class="mt12"></div>
       <textarea class="field" id="ip" data-mic rows="5" maxlength="2000" placeholder="صف الصورة: المنتج، المكان، الأشخاص، الإضاءة، الإحساس… مثلاً: زجاجة زيت أرغان على طاولة خشبية في رياض مغربي، ضوء صباحي دافئ">${esc(g.prompt)}</textarea>
       <span class="lbl">المقاس</span>${pills('aspect', [['1:1', '1:1'], ['4:5', '4:5'], ['9:16', '9:16'], ['16:9', '16:9']], g.aspect)}
@@ -1599,9 +1649,12 @@ function drawStudio() {
   $('#itx', v).oninput = (e) => (g.text = e.target.value);
   $('#icol', v).onchange = (e) => (g.useColors = e.target.checked);
   $('#ilogo', v).onchange = (e) => (g.useLogo = e.target.checked);
+  $('#iprodf', v) && ($('#iprodf', v).onchange = async (e) => { try { const dataUrl = await readImage(e.target.files[0]); S.brand = await api(`/api/brands/${b.id}/products/${g.productId}/photo`, { method: 'POST', body: { dataUrl } }); toast('حُفظت صورة المنتج'); drawStudio(); } catch (err) { toast(err.message, true); } });
   $('#iprod', v).onclick = () => openMenu($('#iprod', v), [{ label: 'بدون منتج محدد', selected: !g.productId, onClick: () => { g.productId = ''; drawStudio(); } }, ...b.products.map((p) => ({ label: p.name, desc: p.photo ? (p.price || 'صورة المنتج جاهزة') : 'ينقصه صورة', selected: g.productId === p.id, onClick: () => { g.productId = p.id; drawStudio(); } }))]);
   $('#igo', v).onclick = (e) => busy(e.currentTarget, async () => {
     if (!g.prompt.trim()) return toast('اكتب وصف الصورة', true);
+    const sp = b.products.find((x) => x.id === g.productId);
+    if (sp && !sp.photo) return productPhotoModal(sp, () => drawStudio());
     try { const img = await api(`/api/brands/${b.id}/images`, { method: 'POST', body: { ...g, ai: aiOf('image') } }); S.images = [img, ...S.images]; S.ov = null; drawStudio(); toast(`تم · ${img.model} · ${(img.ms / 1000).toFixed(1)} ث`); fallbackNote(img); } catch (err) { toast(err.message, true); }
   });
   $$('[data-iedit]', v).forEach((x) => (x.onclick = () => editModal('image', S.images.find((y) => y.id === x.dataset.iedit))));
@@ -1641,6 +1694,9 @@ async function drawVideo() {
     <div class="card s5"><div class="card-h"><h3>فيديو جديد</h3></div>
       ${usable.length ? '' : `<div class="inset sm mb16">لا يوجد نموذج فيديو جاهز. اربط Hakim AI Gateway (Veo) أو مفتاح Gemini أو OpenAI (Sora). <button class="btn grey sm mt8" data-go="providers">${ic('plug')}المزوّدون</button></div>`}
       <span class="lbl" style="margin-top:0">${KIND_L.video}</span>${pickerHTML('video')}
+      <span class="lbl">صورة البداية <span class="muted xs" style="font-weight:400">· اختياري: الفيديو يبدأ منها ويحرّكها</span></span>
+      ${g.imageUrl ? '' : `<div class="grid c2" style="gap:10px"><label class="drop" style="display:block;padding:14px">${ic('upload')}<div class="sm mt8"><b>ارفع صورة</b></div><div class="xs">منتج، شخص، مشهد · PNG / JPG / WEBP</div><input type="file" id="vimgf" accept="image/png,image/jpeg,image/webp" hidden></label>
+        <button class="drop pick" id="vgal" style="display:block;padding:14px" type="button">${ic('studio')}<div class="sm mt8"><b>من المعرض أو المنتجات</b></div><div class="xs">صورة ولّدتها أو صورة منتج</div></button></div>`}
       ${g.imageUrl ? `<div class="flex mt12 inset" style="padding:8px"><img src="${esc(g.imageUrl)}" alt="" style="width:56px;height:56px;object-fit:cover;border-radius:8px"><span class="sm grow">صورة البداية: سيتم تحريكها</span><button class="btn grey icon sm" id="vnoimg" aria-label="إزالة">${ic('x')}</button></div>` : ''}
       <label class="lbl">وصف المشهد</label>
       <textarea class="field" id="vp" data-mic rows="4" maxlength="3000" placeholder="مثلاً: لقطة سينمائية لعائلة مغربية في صالون تقليدي، الأب يجرّب نظارات جديدة ويبتسم، الكاميرا تقترب ببطء، إضاءة دافئة">${esc(g.prompt)}</textarea>
@@ -1678,6 +1734,16 @@ async function drawVideo() {
   $('#vvo', v).oninput = (e) => (g.voiceover = e.target.value);
   $('#vaud', v).onchange = (e) => (g.audio = e.target.checked);
   $('#vnoimg', v) && ($('#vnoimg', v).onclick = () => { g.imageUrl = ''; drawVideo(); });
+  $('#vimgf', v) && ($('#vimgf', v).onchange = async (e) => {
+    const z = e.target.closest('.drop'); z.classList.add('over');
+    try { const dataUrl = await readImage(e.target.files[0], 8); const r = await api(`/api/brands/${S.brand.id}/uploads`, { method: 'POST', body: { dataUrl } }); g.imageUrl = r.url; drawVideo(); } catch (err) { toast(err.message, true); z.classList.remove('over'); }
+  });
+  $('#vgal', v) && ($('#vgal', v).onclick = async (e) => {
+    if (!S.images) { try { S.images = (await api(`/api/brands/${S.brand.id}/images`)).images; } catch { S.images = []; } }
+    const items = [...S.brand.products.filter((p) => p.photo).map((p) => ({ label: `منتج: ${p.name}`, onClick: () => { g.imageUrl = p.photo; drawVideo(); } })), ...S.images.slice(0, 20).map((im) => ({ label: (im.prompt || 'صورة').slice(0, 50), desc: im.aspect, onClick: () => { g.imageUrl = im.url; g.aspect = im.aspect === '16:9' ? '16:9' : '9:16'; drawVideo(); } }))];
+    if (!items.length) return toast('لا توجد صور بعد في المعرض أو المنتجات', true);
+    openMenu(e.currentTarget, items);
+  });
   $('#vgo2', v).onclick = (e) => busy(e.currentTarget, async () => {
     if (!g.prompt.trim()) return toast('اكتب وصف المشهد', true);
     try {
