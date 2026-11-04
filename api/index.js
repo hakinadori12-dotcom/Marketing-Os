@@ -5,6 +5,7 @@ const eleven = require('../lib/eleven');
 const providers = require('../lib/providers');
 const ai = require('../lib/ai');
 const content = require('../lib/content');
+const video = require('../lib/video');
 const { sign, verify, safeEqual } = require('../lib/crypto');
 
 const COOKIE = 'mos_s';
@@ -353,6 +354,14 @@ module.exports = async (req, res) => {
       }
       const im = sub && sub.match(/^images\/([a-z0-9]+)$/);
       if (im && method === 'DELETE') { await content.deleteImage(id, im[1]); return send(res, 200, { ok: true }); }
+
+      if (sub === 'videos') {
+        if (method === 'GET') return send(res, 200, { videos: await video.list(id) });
+        if (method === 'POST') return send(res, 200, await video.start(id, await readBody(req)));
+      }
+      const vm = sub && sub.match(/^videos\/([a-z0-9]+)$/);
+      if (vm && method === 'GET') return send(res, 200, await video.status(id, vm[1]));
+      if (vm && method === 'DELETE') { await video.remove(id, vm[1]); return send(res, 200, { ok: true }); }
 
       if (sub === 'voices') { const list = await eleven.voices(id); return send(res, 200, { voices: list, note: list.note || null }); }
       if (sub === 'audio') return send(res, 200, { items: await eleven.history(id, Number(query.get('limit')) || 30) });

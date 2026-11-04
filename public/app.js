@@ -96,6 +96,7 @@ const S = {
   ctab: 'new', stab: 'image', mcache: {}, pick: (() => { try { return JSON.parse(store.get('mos-pick', '{}')) || {}; } catch { return {}; } })(), opts: null, prov: null, batches: null, batch: null, plan: null, planMonths: [], images: null,
   form: { platforms: ['instagram'], type: 'post', goal: 'engagement', dialect: 'darija', framework: 'auto', count: 3, idea: '', productId: '', occasion: '' },
   planForm: { month: '', perWeek: 4, platforms: ['instagram', 'facebook'], goal: 'engagement', dialect: 'darija' },
+  vid: { prompt: '', voiceover: '', aspect: '9:16', seconds: 8, audio: true, resolution: '720p', imageUrl: '' }, videos: null,
   img: { prompt: '', aspect: '1:1', style: 'photo', useLogo: false, useColors: true, text: '', quality: 'medium' },
 };
 
@@ -951,7 +952,7 @@ function bindPicker(root, onChange) {
     if (!data.models.length) return openMenu(btn, [{ label: 'لا توجد نماذج مناسبة', desc: 'اربط مفتاحاً يدعم ' + KIND[kind], icon: 'plug', onClick: () => go('providers') }], { width: 300 });
     const groups = {};
     for (const m of data.models) (groups[m.providerName] = groups[m.providerName] || []).push(m);
-    const items = kind === 'video' ? [] : [{ label: '✦ تلقائي', desc: 'يختار أفضل نموذج للمهمة، وإذا فشل يجرّب البديل وحده', selected: cur.provider === 'auto', onClick: () => { S.pick[kind] = { provider: 'auto' }; store.set('mos-pick', JSON.stringify(S.pick)); onChange && onChange(); } }, { divider: true }];
+    const items = [{ label: '✦ تلقائي', desc: 'يختار أفضل نموذج للمهمة، وإذا فشل يجرّب البديل وحده', selected: cur.provider === 'auto', onClick: () => { S.pick[kind] = { provider: 'auto' }; store.set('mos-pick', JSON.stringify(S.pick)); onChange && onChange(); } }, { divider: true }];
     for (const [name, list] of Object.entries(groups)) {
       if (items.length && !items[items.length - 1].divider) items.push({ divider: true });
       for (const m of list) items.push({ label: m.model, desc: name + (data.current?.provider === m.provider && data.current?.model === m.model ? ' · الافتراضي' : '') + (m.soon && kind === 'video' ? ' · قريباً' : ''), selected: cur?.provider === m.provider && cur?.model === m.model, onClick: () => { S.pick[kind] = { provider: m.provider, model: m.model }; store.set('mos-pick', JSON.stringify(S.pick)); onChange && onChange(); } });
@@ -1367,6 +1368,7 @@ function drawStudio() {
         <figcaption><span class="xs grow" title="${esc(x.prompt)}">${esc(x.prompt)}</span>
         <a class="btn grey icon sm" href="${esc(x.url)}" download target="_blank" rel="noopener" aria-label="تحميل">${ic('download')}</a>
         <button class="btn grey icon sm" data-re="${x.id}" aria-label="إعادة استعمال الوصف">${ic('refresh')}</button>
+        <button class="btn grey icon sm" data-anim="${x.id}" aria-label="حوّلها إلى فيديو" title="حوّلها إلى فيديو">${ic('play')}</button>
         <button class="btn grey icon sm" data-del="${x.id}" aria-label="حذف">${ic('trash')}</button></figcaption></figure>`).join('')}</div>`
       : `<div class="empty" style="padding:28px"><span class="ic">${ic('studio')}</span><h3>لا توجد صور بعد</h3><p>اكتب وصفاً واضغط توليد. يمكنك أيضاً تصميم صورة لأي منشور من صفحة النتائج.</p></div>`}
     </div></div>`);
@@ -1380,6 +1382,7 @@ function drawStudio() {
     if (!g.prompt.trim()) return toast('اكتب وصف الصورة', true);
     try { const img = await api(`/api/brands/${b.id}/images`, { method: 'POST', body: { ...g, ai: aiOf('image') } }); S.images = [img, ...S.images]; S.ov = null; drawStudio(); toast(`تم · ${img.model} · ${(img.ms / 1000).toFixed(1)} ث`); fallbackNote(img); } catch (err) { toast(err.message, true); }
   });
+  $$('[data-anim]', v).forEach((x) => (x.onclick = () => { const im = S.images.find((y) => y.id === x.dataset.anim); Object.assign(S.vid, { imageUrl: im.url, aspect: im.aspect === '9:16' || im.aspect === '4:5' ? '9:16' : '16:9', prompt: S.vid.prompt || im.prompt }); S.stab = 'video'; PAGES.studio(); }));
   $$('[data-re]', v).forEach((x) => (x.onclick = () => { const im = S.images.find((y) => y.id === x.dataset.re); Object.assign(g, { prompt: im.prompt, aspect: im.aspect, style: im.style || 'none' }); drawStudio(); }));
   $$('[data-del]', v).forEach((x) => (x.onclick = async () => {
     if (!(await confirmBox('حذف الصورة؟', 'ستُحذف من المعرض والتخزين.', 'حذف', true))) return;
@@ -1387,21 +1390,93 @@ function drawStudio() {
   }));
 }
 
+function videoDurations(model) {
+  const m = String(model || '').toLowerCase();
+  if (/sora/.test(m)) return [4, 8, 12];
+  if (/veo-2/.test(m)) return [5, 6, 7, 8];
+  if (/veo/.test(m)) return [4, 6, 8];
+  return [4, 6, 8];
+}
+let videoTimer = null;
 async function drawVideo() {
   const data = await loadModels('video').catch(() => ({ models: [] }));
-  const groups = {};
-  for (const m of data.models) (groups[m.providerName] = groups[m.providerName] || []).push(m.model);
+  if (!S.videos) S.videos = (await api(`/api/brands/${S.brand.id}/videos`)).videos;
+  const g = S.vid;
+  const usable = data.models.filter((m) => !m.soon);
+  const cur = aiOf('video');
+  const model = cur.provider === 'auto' ? (data.current?.model || usable[0]?.model) : cur.model;
+  const secs = videoDurations(model);
+  if (!secs.includes(g.seconds)) g.seconds = secs[secs.length - 1];
+  const fmtT = (t) => { const s2 = Math.max(0, Math.round((Date.now() - new Date(t).getTime()) / 1000)); return s2 < 60 ? `${s2} ث` : `${Math.floor(s2 / 60)} د ${s2 % 60} ث`; };
   const v = view(`<div class="grid c12">
-    <div class="card s5"><div class="card-h"><h3>فيديو جديد</h3>${chip('المرحلة القادمة', 'vi')}</div>
+    <div class="card s5"><div class="card-h"><h3>فيديو جديد</h3></div>
+      ${usable.length ? '' : `<div class="inset sm mb16">لا يوجد نموذج فيديو جاهز. اربط Hakim AI Gateway (Veo) أو مفتاح Gemini أو OpenAI (Sora). <button class="btn grey sm mt8" data-go="providers">${ic('plug')}المزوّدون</button></div>`}
       <span class="lbl" style="margin-top:0">${KIND_L.video}</span>${pickerHTML('video')}
-      <label class="lbl">وصف الفيديو</label><textarea class="field" rows="4" disabled placeholder="توليد الفيديو يُفعَّل في المرحلة القادمة: نص ← فيديو، صورة ← فيديو، حركات كاميرا، إعلانات جاهزة."></textarea>
-      <div class="flex mt16" style="justify-content:flex-end"><button class="btn primary" disabled>${ic('play')}توليد الفيديو</button></div></div>
-    <div class="card s7"><div class="card-h"><h3>نماذج الفيديو المتاحة من مفاتيحك</h3><div class="end"><span class="muted xs">${data.models.length}</span></div></div>
-      ${data.models.length ? Object.entries(groups).map(([n, list]) => `<span class="lbl">${esc(n)}</span><div class="flex wrap">${list.map((m) => chip(m, '', false)).join('')}</div>`).join('')
-      : `<div class="empty" style="padding:28px"><span class="ic">${ic('plug')}</span><h3>لا توجد نماذج فيديو بعد</h3><p>اربط مفتاح Gemini (Veo) أو OpenAI (Sora) أو Kling أو Seedance أو Wan وستظهر نماذجها هنا تلقائياً.</p><button class="btn primary" data-go="providers">${ic('plug')}المفاتيح والمزوّدون</button></div>`}
+      ${g.imageUrl ? `<div class="flex mt12 inset" style="padding:8px"><img src="${esc(g.imageUrl)}" alt="" style="width:56px;height:56px;object-fit:cover;border-radius:8px"><span class="sm grow">صورة البداية: سيتم تحريكها</span><button class="btn grey icon sm" id="vnoimg" aria-label="إزالة">${ic('x')}</button></div>` : ''}
+      <label class="lbl">وصف المشهد</label>
+      <textarea class="field" id="vp" rows="4" maxlength="3000" placeholder="مثلاً: لقطة سينمائية لعائلة مغربية في صالون تقليدي، الأب يجرّب نظارات جديدة ويبتسم، الكاميرا تقترب ببطء، إضاءة دافئة">${esc(g.prompt)}</textarea>
+      <label class="lbl">التعليق الصوتي / الحوار (اختياري)</label>
+      <textarea class="field" id="vvo" rows="2" maxlength="500" placeholder="الجملة التي تُقال في الفيديو، مثلاً: نظارتك الجديدة بنص الثمن، غير هاد الجمعة!">${esc(g.voiceover)}</textarea>
+      <div class="grid c2 mt8" style="gap:12px">
+        <div><span class="lbl">المدة</span><div class="opts" data-opts="seconds">${secs.map((n) => `<button class="opt ${g.seconds === n ? 'on' : ''}" data-k="${n}">${n} ث</button>`).join('')}</div></div>
+        <div><span class="lbl">المقاس</span><div class="opts" data-opts="aspect"><button class="opt ${g.aspect === '9:16' ? 'on' : ''}" data-k="9:16">9:16 ريلز</button><button class="opt ${g.aspect === '16:9' ? 'on' : ''}" data-k="16:9">16:9</button></div></div>
+      </div>
+      <div class="grid c2" style="gap:12px">
+        <div><span class="lbl">الجودة</span><div class="opts" data-opts="resolution"><button class="opt ${g.resolution === '720p' ? 'on' : ''}" data-k="720p">720p</button><button class="opt ${g.resolution === '1080p' ? 'on' : ''}" data-k="1080p">1080p</button></div></div>
+        <div><span class="lbl">الصوت</span><label class="flex sm" style="height:36px;cursor:pointer"><input type="checkbox" class="check" id="vaud" ${g.audio ? 'checked' : ''}>صوت ومؤثرات داخل الفيديو</label></div>
+      </div>
+      <p class="hint mt12">كل مقطع حتى ${secs[secs.length - 1]} ثوانٍ حسب النموذج. التوليد يأخذ عادة 1 إلى 4 دقائق، ويمكنك مغادرة الصفحة.</p>
+      <div class="flex mt16" style="justify-content:flex-end"><button class="btn primary" id="vgo2" data-busy="يبدأ…" ${usable.length ? '' : 'disabled'}>${ic('play')}توليد الفيديو</button></div>
+    </div>
+    <div class="card s7"><div class="card-h"><h3>فيديوهات ${esc(S.brand.name)}</h3><div class="end"><span class="muted xs">${S.videos.length}</span></div></div>
+      ${S.videos.length ? `<div class="gallery">${S.videos.map((x) => `<figure data-vd="${x.id}">
+        ${x.status === 'completed' ? `<video src="${esc(x.url)}" controls playsinline preload="metadata" style="width:100%;display:block;aspect-ratio:${x.aspect.replace(':', '/')};background:#000"></video>`
+          : x.status === 'failed' ? `<div class="inset sm" style="margin:8px;color:var(--t-ro)">${esc(x.error || 'فشل التوليد')}</div>`
+          : `<div style="aspect-ratio:${x.aspect.replace(':', '/')};display:grid;place-items:center;background:var(--bg-hover)"><div style="text-align:center"><span class="spin" style="width:22px;height:22px"></span><div class="xs muted mt8">يُولَّد… ${fmtT(x.createdAt)}${x.progress ? ` · ${x.progress}%` : ''}</div></div></div>`}
+        <figcaption><span class="xs grow" title="${esc(x.prompt)}">${esc(x.seconds + ' ث · ' + x.model)}</span>
+          ${x.url ? `<a class="btn grey icon sm" href="${esc(x.url)}" download target="_blank" rel="noopener" aria-label="تحميل">${ic('download')}</a>` : ''}
+          <button class="btn grey icon sm" data-vre="${x.id}" aria-label="إعادة استعمال">${ic('refresh')}</button>
+          <button class="btn grey icon sm" data-vdel="${x.id}" aria-label="حذف">${ic('trash')}</button></figcaption></figure>`).join('')}</div>`
+      : `<div class="empty" style="padding:28px"><span class="ic">${ic('play')}</span><h3>لا توجد فيديوهات بعد</h3><p>اكتب وصف المشهد، أو اضغط ▷ على أي صورة في معرض الصور لتحريكها.</p></div>`}
     </div></div>`);
+  bindOpts(v, g);
+  $$('[data-opts="seconds"] .opt', v).forEach((x) => x.addEventListener('click', () => (g.seconds = Number(x.dataset.k))));
   bindPicker(v, () => drawVideo());
   $$('[data-go]', v).forEach((x) => (x.onclick = () => go(x.dataset.go)));
+  $('#vp', v).oninput = (e) => (g.prompt = e.target.value);
+  $('#vvo', v).oninput = (e) => (g.voiceover = e.target.value);
+  $('#vaud', v).onchange = (e) => (g.audio = e.target.checked);
+  $('#vnoimg', v) && ($('#vnoimg', v).onclick = () => { g.imageUrl = ''; drawVideo(); });
+  $('#vgo2', v).onclick = (e) => busy(e.currentTarget, async () => {
+    if (!g.prompt.trim()) return toast('اكتب وصف المشهد', true);
+    try {
+      const job = await api(`/api/brands/${S.brand.id}/videos`, { method: 'POST', body: { ...g, ai: aiOf('video') } });
+      S.videos = [job, ...S.videos]; S.ov = null;
+      toast(`بدأ التوليد · ${job.model} · ${job.seconds} ث`);
+      if (job.fallback) fallbackNote({ fallback: job.fallback, model: job.model });
+      drawVideo();
+    } catch (err) { toast(err.message, true); }
+  });
+  $$('[data-vre]', v).forEach((x) => (x.onclick = () => { const j = S.videos.find((y) => y.id === x.dataset.vre); Object.assign(g, { prompt: j.prompt, voiceover: j.voiceover || '', aspect: j.aspect, seconds: j.seconds, imageUrl: j.fromImage || '' }); drawVideo(); }));
+  $$('[data-vdel]', v).forEach((x) => (x.onclick = async () => {
+    if (!(await confirmBox('حذف الفيديو؟', 'سيُحذف من المعرض والتخزين.', 'حذف', true))) return;
+    try { await api(`/api/brands/${S.brand.id}/videos/${x.dataset.vdel}`, { method: 'DELETE' }); S.videos = S.videos.filter((y) => y.id !== x.dataset.vdel); drawVideo(); } catch (err) { toast(err.message, true); }
+  }));
+  // poll running jobs while this tab is open
+  clearTimeout(videoTimer);
+  if (S.videos.some((x) => x.status === 'processing')) {
+    const brandId = S.brand.id;
+    const tick = async () => {
+      if (S.page !== 'studio' || S.stab !== 'video' || S.brand?.id !== brandId) return;
+      let changed = false;
+      for (const j of S.videos.filter((x) => x.status === 'processing')) {
+        try { const n = await api(`/api/brands/${brandId}/videos/${j.id}`); if (n.status !== 'processing') { changed = true; toast(n.status === 'completed' ? 'الفيديو جاهز ✓' : `فشل الفيديو: ${n.error}`, n.status !== 'completed'); } Object.assign(j, n); } catch { /* keep polling */ }
+      }
+      if (document.querySelector('#vp:focus, #vvo:focus') && !changed) { videoTimer = setTimeout(tick, 8000); return; }
+      drawVideo();
+    };
+    videoTimer = setTimeout(tick, 8000);
+  }
 }
 
 // ---------- setup (database not connected yet) ----------
