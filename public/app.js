@@ -1332,13 +1332,12 @@ async function drawPlan() {
 const STYLE_L = { none: 'بدون', photo: 'تصوير منتج', studio: 'استوديو', lifestyle: 'لايف ستايل', flat: 'رسم مسطّح', '3d': 'ثلاثي الأبعاد', minimal: 'مينيمال' };
 PAGES.studio = async () => {
   if (needBrand()) return header();
-  header(pills('stab', [['image', 'الصور'], ['video', 'الفيديو']], S.stab));
-  requestAnimationFrame(() => placePills($('#head')));
+  header();
   if (!S.prov) await loadProviders().catch(() => null);
   if (S.stab === 'video') return drawVideo();
   await loadModels('image').catch(() => null);
   if (!S.mcache.image?.models.length) {
-    view(`<div class="empty"><span class="ic">${ic('studio')}</span><h3>اربط مزوّد صور</h3><p>استوديو الصور يعمل بمفتاحك: Gemini (Nano Banana) أو OpenAI (GPT Image) أو xAI (Grok).</p><button class="btn primary" id="gp">${ic('plug')}المفاتيح والمزوّدون</button></div>`);
+    view(`${studioTabs()}<div class="empty"><span class="ic">${ic('studio')}</span><h3>اربط مزوّد صور</h3><p>استوديو الصور يعمل بمفتاحك: Gemini (Nano Banana) أو OpenAI (GPT Image) أو xAI (Grok).</p><button class="btn primary" id="gp">${ic('plug')}المفاتيح والمزوّدون</button></div>`);
     $('#gp').onclick = () => go('providers');
     return;
   }
@@ -1349,7 +1348,7 @@ function drawStudio() {
   const g = S.img;
   const b = S.brand;
   const st = aiOf('image');
-  const v = view(`<div class="grid c12">
+  const v = view(`${studioTabs()}<div class="grid c12">
     <div class="card s5"><div class="card-h"><h3>صورة جديدة</h3></div>
       <span class="lbl" style="margin-top:0">${KIND_L.image}</span>${pickerHTML('image')}<div class="mt12"></div>
       <textarea class="field" id="ip" rows="5" maxlength="2000" placeholder="صف الصورة: المنتج، المكان، الأشخاص، الإضاءة، الإحساس… مثلاً: زجاجة زيت أرغان على طاولة خشبية في رياض مغربي، ضوء صباحي دافئ">${esc(g.prompt)}</textarea>
@@ -1390,6 +1389,11 @@ function drawStudio() {
   }));
 }
 
+function studioTabs() {
+  return `<div class="stabs" role="tablist">${[['image', 'studio', 'صور', 'منشورات، إعلانات، صور منتجات'], ['video', 'play', 'فيديو', 'ريلز وإعلانات فيديو بالصوت']].map(([k, i, t, d]) => `<button class="stab ${S.stab === k ? 'on' : ''}" data-stab="${k}" role="tab" aria-selected="${S.stab === k}">${ic(i)}<span><b>${t}</b><small>${d}</small></span></button>`).join('')}</div>`;
+}
+document.addEventListener('click', (e) => { const b = e.target.closest('[data-stab]'); if (!b) return; S.stab = b.dataset.stab; PAGES.studio(); });
+
 function videoDurations(model) {
   const m = String(model || '').toLowerCase();
   if (/sora/.test(m)) return [4, 8, 12];
@@ -1408,7 +1412,7 @@ async function drawVideo() {
   const secs = videoDurations(model);
   if (!secs.includes(g.seconds)) g.seconds = secs[secs.length - 1];
   const fmtT = (t) => { const s2 = Math.max(0, Math.round((Date.now() - new Date(t).getTime()) / 1000)); return s2 < 60 ? `${s2} ث` : `${Math.floor(s2 / 60)} د ${s2 % 60} ث`; };
-  const v = view(`<div class="grid c12">
+  const v = view(`${studioTabs()}<div class="grid c12">
     <div class="card s5"><div class="card-h"><h3>فيديو جديد</h3></div>
       ${usable.length ? '' : `<div class="inset sm mb16">لا يوجد نموذج فيديو جاهز. اربط Hakim AI Gateway (Veo) أو مفتاح Gemini أو OpenAI (Sora). <button class="btn grey sm mt8" data-go="providers">${ic('plug')}المزوّدون</button></div>`}
       <span class="lbl" style="margin-top:0">${KIND_L.video}</span>${pickerHTML('video')}
