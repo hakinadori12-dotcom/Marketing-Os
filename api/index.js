@@ -363,6 +363,10 @@ module.exports = async (req, res) => {
         if (method === 'GET') return send(res, 200, { images: await content.listImages(id) });
         if (method === 'POST') return send(res, 200, await content.makeImage(id, await readBody(req)));
       }
+      const ie = sub && sub.match(/^images\/([a-z0-9]+)\/edit$/);
+      if (ie && method === 'POST') return send(res, 200, await content.editImage(id, ie[1], await readBody(req)));
+      const ve = sub && sub.match(/^videos\/([a-z0-9]+)\/edit$/);
+      if (ve && method === 'POST') return send(res, 200, await video.edit(id, ve[1], await readBody(req)));
       const im = sub && sub.match(/^images\/([a-z0-9]+)$/);
       if (im && method === 'DELETE') { await content.deleteImage(id, im[1]); return send(res, 200, { ok: true }); }
 

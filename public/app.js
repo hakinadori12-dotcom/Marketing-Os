@@ -94,7 +94,7 @@ const S = {
   voices: null, models: null, audio: null, voiceId: store.get('mos-voice', ''), voiceQuery: '', tts: { modelId: 'eleven_multilingual_v2', stability: 0.5, similarity: 0.75, style: 0, speed: 1, text: '' },
   analysis: null, sys: null, textTest: null, storage: null,
   ctab: 'new', stab: 'image', mcache: {}, pick: (() => { try { return JSON.parse(store.get('mos-pick', '{}')) || {}; } catch { return {}; } })(), opts: null, prov: null, batches: null, batch: null, plan: null, planMonths: [], images: null,
-  form: { platforms: ['instagram'], type: 'post', goal: 'engagement', dialect: 'darija', framework: 'auto', count: 3, idea: '', productId: '', occasion: '' },
+  form: { platforms: ['instagram'], types: ['post'], type: 'post', goal: 'engagement', dialect: 'darija', framework: 'auto', count: 3, idea: '', productId: '', occasion: '' },
   planForm: { month: '', perWeek: 4, platforms: ['instagram', 'facebook'], goal: 'engagement', dialect: 'darija' },
   vid: { prompt: '', voiceover: '', aspect: '9:16', seconds: 8, audio: true, resolution: '720p', imageUrl: '' }, videos: null,
   img: { prompt: '', aspect: '1:1', style: 'photo', useLogo: false, useColors: true, text: '', quality: 'medium' },
@@ -1103,7 +1103,7 @@ PAGES.create = async () => {
 function optsRow(key, map, cur, multi = false) {
   return `<div class="opts" data-opts="${key}">${Object.entries(map).map(([k, l]) => `<button class="opt ${multi ? (cur.includes(k) ? 'on' : '') : k === cur ? 'on' : ''}" data-k="${k}">${esc(l.split(' (')[0])}</button>`).join('')}</div>`;
 }
-function bindOpts(root, state, multi = []) {
+function bindOpts(root, state, multi = [], max = {}) {
   $$('[data-opts]', root).forEach((row) => {
     const key = row.dataset.opts;
     $$('.opt', row).forEach((b) => (b.onclick = () => {
@@ -1111,6 +1111,7 @@ function bindOpts(root, state, multi = []) {
         const set = new Set(state[key]);
         set.has(b.dataset.k) ? set.delete(b.dataset.k) : set.add(b.dataset.k);
         if (!set.size) return toast('اختر واحدة على الأقل', true);
+        if (max[key] && set.size > max[key]) return toast(`الحد الأقصى ${max[key]}`, true);
         state[key] = [...set];
         b.classList.toggle('on');
       } else {
@@ -1135,7 +1136,7 @@ async function drawCreate() {
       <span class="lbl" style="margin-top:0">المنتج أو الخدمة</span>
       <div class="sel"><button class="sel-btn" id="cprod" data-menu><span class="lab">${prod ? esc(prod.name) : b.products.length ? 'البراند كاملاً (بدون منتج محدد)' : 'البراند كاملاً · أضف منتجات من عقل البراند'}</span>${ic('chev')}</button></div>
       <span class="lbl">المنصات</span>${optsRow('platforms', o.PLATFORMS, f.platforms, true)}
-      <span class="lbl">نوع المحتوى</span>${optsRow('type', o.TYPES, f.type)}
+      <span class="lbl">نوع المحتوى <span class="muted xs" style="font-weight:400">· اختر حتى 3 أنواع في نفس الطلب</span></span>${optsRow('types', o.TYPES, f.types, true)}
       <span class="lbl">الهدف</span>${optsRow('goal', o.GOALS, f.goal)}
       <div class="grid c2" style="gap:12px">
         <div><span class="lbl">اللغة / اللهجة</span>${optsRow('dialect', o.DIALECTS, f.dialect)}</div>
@@ -1144,7 +1145,7 @@ async function drawCreate() {
       <span class="lbl">الفكرة أو ملاحظاتك (اختياري)</span>
       <textarea class="field" id="cidea" data-mic rows="3" maxlength="1500" placeholder="مثلاً: عرض خاص 20% بمناسبة العودة للمدارس، ركّز على الجودة والتوصيل السريع…">${esc(f.idea)}</textarea>
       ${occ.length ? `<span class="lbl">مناسبات هذا الشهر</span><div class="opts" id="cocc">${occ.map((x) => `<button class="opt ${f.occasion === x.name ? 'on' : ''}" data-o="${esc(x.name)}">${esc(x.name)} <span class="muted xs ltr">${x.date.slice(5)}</span></button>`).join('')}</div>` : ''}
-      <div class="flex mt16"><span class="sm sec">العدد</span><div class="pills" data-pills="count">${[1, 3, 5, 7, 10].map((n) => `<button data-v="${n}" class="${n === f.count ? 'on' : ''}">${n}</button>`).join('')}</div><span class="grow"></span>
+      <div class="flex mt16"><span class="sm sec">${f.types.length > 1 ? 'العدد لكل نوع' : 'العدد'}</span><div class="pills" data-pills="count">${[1, 3, 5, 7, 10].map((n) => `<button data-v="${n}" class="${n === f.count ? 'on' : ''}">${n}</button>`).join('')}</div><span class="grow"></span>
         <button class="btn primary" id="cgo" data-busy="يكتب… قد يستغرق دقيقة">${ic('sparkle')}توليد المحتوى</button></div>
     </div>
     <div class="stack s4">
@@ -1156,7 +1157,7 @@ async function drawCreate() {
         ${S.batches.length ? `<div class="rows">${S.batches.slice(0, 5).map((x) => `<div class="row-i" style="cursor:pointer" data-bt="${x.id}"><div class="t"><b class="sm" style="display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(x.first || '—')}</b><small>${x.count} · ${esc(o.TYPES[x.params.type]?.split(' (')[0] || '')} · ${rel(x.createdAt)}</small></div></div>`).join('')}</div>` : '<p class="muted sm">لا توجد دفعات بعد</p>'}
       </div>
     </div></div>`);
-  bindOpts(v, f, ['platforms']);
+  bindOpts(v, f, ['platforms', 'types'], { types: 3 });
   bindPicker(v, () => drawCreate());
   $$('[data-go]', v).forEach((x) => (x.onclick = () => go(x.dataset.go)));
   $$('[data-tab]', v).forEach((x) => (x.onclick = () => { S.ctab = x.dataset.tab; PAGES.create(); }));
@@ -1204,12 +1205,13 @@ function drawBatch() {
   const o = S.opts;
   const p = bt.params;
   const v = view(`<div class="toolbar"><button class="btn ghost sm" id="bback">${ic('arrow', 'rtl-flip')}كل النتائج</button>
-      <span class="sm sec">${esc(o.TYPES[p.type]?.split(' (')[0])} · ${esc(o.GOALS[p.goal])} · ${esc(o.DIALECTS[p.dialect])}${p.productName ? ' · ' + esc(p.productName) : ''}</span>
+      <span class="sm sec">${esc((p.types || [p.type]).map((t) => o.TYPES[t]?.split(' (')[0]).join(' + '))} · ${esc(o.GOALS[p.goal])} · ${esc(o.DIALECTS[p.dialect])}${p.productName ? ' · ' + esc(p.productName) : ''}</span>
       <div class="end"><span class="muted xs ltr">${esc(bt.model)}</span><button class="btn grey icon sm" id="bdel" aria-label="حذف">${ic('trash')}</button></div></div>
-    <div class="grid c2" style="align-items:start">${bt.items.map((it) => `<div class="card post" data-it="${it.id}">
-      <div class="card-h"><span class="pf">${PLAT_IC[it.platform] || '•'}</span><h3 style="font-size:14px">${esc(it.title || o.PLATFORMS[it.platform])}</h3>
+    <div class="grid c2" style="align-items:start">${bt.items.map((it) => `<div class="card post ${it.best ? 'is-best' : ''}" data-it="${it.id}">
+      <div class="card-h"><span class="pf">${PLAT_IC[it.platform] || '•'}</span><h3 style="font-size:14px">${esc(it.title || o.PLATFORMS[it.platform])}</h3>${(p.types || []).length > 1 ? chip(o.TYPES[it.type]?.split(' (')[0] || '', '', false) : ''}
         <div class="end">${it.status === 'approved' ? chip('معتمد', 'em') : it.status === 'rejected' ? chip('مرفوض', 'ro') : chip('مسودة', '')}</div></div>
       ${it.image?.url ? `<img class="post-img" src="${esc(it.image.url)}" alt="">` : ''}
+      ${it.score ? `<div class="verdict ${it.best ? 'best' : ''}"><b>${it.best ? '★ الأفضل في هذه الدفعة · ' : ''}${it.score}/10</b><span>${esc(it.why || '')}</span></div>` : ''}
       <p class="hook">${esc(it.hook)}</p>
       <p class="cap">${esc(it.caption)}</p>
       ${it.slides?.length ? `<ol class="slides">${it.slides.map((x) => `<li>${esc(x)}</li>`).join('')}</ol>` : ''}
@@ -1369,9 +1371,10 @@ function drawStudio() {
     </div>
     <div class="card s7"><div class="card-h"><h3>معرض ${esc(b.name)}</h3><div class="end"><span class="muted xs">${S.images.length}</span></div></div>
       ${S.images.length ? `<div class="gallery">${S.images.map((x) => `<figure data-im="${x.id}"><img src="${esc(x.url)}" alt="" loading="lazy" style="aspect-ratio:${x.aspect.replace(':', '/')}">
-        <figcaption><span class="xs grow" title="${esc(x.prompt)}">${esc(x.prompt)}</span>
+        <figcaption>${x.version ? `<span class="chip vi" title="${esc(x.edit || '')}">v${x.version}</span>` : ''}<span class="xs grow" title="${esc(x.edit ? 'تعديل: ' + x.edit : x.prompt)}">${esc(x.edit ? 'تعديل: ' + x.edit : x.prompt)}</span>
         <a class="btn grey icon sm" href="${esc(x.url)}" download target="_blank" rel="noopener" aria-label="تحميل">${ic('download')}</a>
         <button class="btn grey icon sm" data-re="${x.id}" aria-label="إعادة استعمال الوصف">${ic('refresh')}</button>
+        <button class="btn grey icon sm" data-iedit="${x.id}" aria-label="تعديل الصورة" title="تعديل الصورة">${ic('edit')}</button>
         <button class="btn grey icon sm" data-sch="${x.id}" aria-label="جدولة" title="جدولة">${ic('calendar')}</button>
         <button class="btn grey icon sm" data-anim="${x.id}" aria-label="حوّلها إلى فيديو" title="حوّلها إلى فيديو">${ic('play')}</button>
         <button class="btn grey icon sm" data-del="${x.id}" aria-label="حذف">${ic('trash')}</button></figcaption></figure>`).join('')}</div>`
@@ -1387,6 +1390,7 @@ function drawStudio() {
     if (!g.prompt.trim()) return toast('اكتب وصف الصورة', true);
     try { const img = await api(`/api/brands/${b.id}/images`, { method: 'POST', body: { ...g, ai: aiOf('image') } }); S.images = [img, ...S.images]; S.ov = null; drawStudio(); toast(`تم · ${img.model} · ${(img.ms / 1000).toFixed(1)} ث`); fallbackNote(img); } catch (err) { toast(err.message, true); }
   });
+  $$('[data-iedit]', v).forEach((x) => (x.onclick = () => editModal('image', S.images.find((y) => y.id === x.dataset.iedit))));
   $$('[data-sch]', v).forEach((x) => (x.onclick = () => { const im = S.images.find((y) => y.id === x.dataset.sch); scheduleModal({ title: im.prompt.slice(0, 80), media: { type: 'image', url: im.url, aspect: im.aspect }, source: { kind: 'image', id: im.id } }); }));
   $$('[data-anim]', v).forEach((x) => (x.onclick = () => { const im = S.images.find((y) => y.id === x.dataset.anim); Object.assign(S.vid, { imageUrl: im.url, aspect: im.aspect === '9:16' || im.aspect === '4:5' ? '9:16' : '16:9', prompt: S.vid.prompt || im.prompt }); S.stab = 'video'; PAGES.studio(); }));
   $$('[data-re]', v).forEach((x) => (x.onclick = () => { const im = S.images.find((y) => y.id === x.dataset.re); Object.assign(g, { prompt: im.prompt, aspect: im.aspect, style: im.style || 'none' }); drawStudio(); }));
@@ -1444,7 +1448,8 @@ async function drawVideo() {
         ${x.status === 'completed' ? `<video src="${esc(x.url)}" controls playsinline preload="metadata" style="width:100%;display:block;aspect-ratio:${x.aspect.replace(':', '/')};background:#000"></video>`
           : x.status === 'failed' ? `<div class="inset sm" style="margin:8px;color:var(--t-ro)">${esc(x.error || 'فشل التوليد')}</div>`
           : `<div style="aspect-ratio:${x.aspect.replace(':', '/')};display:grid;place-items:center;background:var(--bg-hover)"><div style="text-align:center"><span class="spin" style="width:22px;height:22px"></span><div class="xs muted mt8">يُولَّد… ${fmtT(x.createdAt)}${x.progress ? ` · ${x.progress}%` : ''}</div></div></div>`}
-        <figcaption><span class="xs grow" title="${esc(x.prompt)}">${esc(x.seconds + ' ث · ' + x.model)}</span>
+        <figcaption>${x.version ? `<span class="chip vi" title="${esc(x.edit || '')}">v${x.version}</span>` : ''}<span class="xs grow" title="${esc(x.edit ? 'تعديل: ' + x.edit : x.prompt)}">${esc(x.seconds + ' ث · ' + x.model)}</span>
+          ${x.status === 'completed' ? `<button class="btn grey icon sm" data-vedit="${x.id}" aria-label="نسخة معدّلة" title="نسخة معدّلة">${ic('edit')}</button>` : ''}
           ${x.url ? `<a class="btn grey icon sm" href="${esc(x.url)}" download target="_blank" rel="noopener" aria-label="تحميل">${ic('download')}</a>` : ''}
           ${x.status === 'completed' ? `<button class="btn primary sm" data-vsch="${x.id}" title="أضفه للتقويم">${ic('calendar')}جدولة</button>` : ''}
           <button class="btn grey icon sm" data-vre="${x.id}" aria-label="إعادة استعمال">${ic('refresh')}</button>
@@ -1469,6 +1474,7 @@ async function drawVideo() {
       drawVideo();
     } catch (err) { toast(err.message, true); }
   });
+  $$('[data-vedit]', v).forEach((x) => (x.onclick = () => editModal('video', S.videos.find((y) => y.id === x.dataset.vedit))));
   $$('[data-vsch]', v).forEach((x) => (x.onclick = () => { const j = S.videos.find((y) => y.id === x.dataset.vsch); scheduleModal({ platforms: j.aspect === '9:16' ? ['instagram', 'tiktok'] : ['youtube', 'facebook'], title: j.prompt.slice(0, 80), caption: j.voiceover || '', media: { type: 'video', url: j.url, aspect: j.aspect }, source: { kind: 'video', id: j.id } }); }));
   $$('[data-vre]', v).forEach((x) => (x.onclick = () => { const j = S.videos.find((y) => y.id === x.dataset.vre); Object.assign(g, { prompt: j.prompt, voiceover: j.voiceover || '', aspect: j.aspect, seconds: j.seconds, imageUrl: j.fromImage || '' }); drawVideo(); }));
   $$('[data-vdel]', v).forEach((x) => (x.onclick = async () => {
@@ -1573,7 +1579,7 @@ function waitFor(sel, fn, ms = 6000) {
 async function runIntent(r) {
   const a = r.action;
   if (a === 'content') {
-    Object.assign(S.form, { idea: r.idea || r.transcript, occasion: '' }, r.platforms?.length ? { platforms: r.platforms } : {}, r.type ? { type: r.type } : {}, r.goal ? { goal: r.goal } : {}, r.dialect ? { dialect: r.dialect } : {}, r.count ? { count: r.count } : {}, r.productId ? { productId: r.productId } : {});
+    Object.assign(S.form, { idea: r.idea || r.transcript, occasion: '' }, r.platforms?.length ? { platforms: r.platforms } : {}, r.type ? { types: [r.type], type: r.type } : {}, r.goal ? { goal: r.goal } : {}, r.dialect ? { dialect: r.dialect } : {}, r.count ? { count: r.count } : {}, r.productId ? { productId: r.productId } : {});
     S.ctab = 'new'; S.batch = null; go('create'); waitFor('#cgo', (b) => b.click());
   } else if (a === 'plan') {
     Object.assign(S.planForm, r.platforms?.length ? { platforms: r.platforms } : {}, r.goal ? { goal: r.goal } : {}, r.dialect ? { dialect: r.dialect } : {}, r.perWeek ? { perWeek: r.perWeek } : {}, /^\d{4}-\d{2}$/.test(r.month || '') ? { month: r.month } : {});
@@ -1695,6 +1701,38 @@ PAGES.calendar = async () => {
   $$('[data-it]', v).forEach((b) => (b.onclick = (e) => { e.stopPropagation(); itemModal(items.find((x) => x.id === b.dataset.it)); }));
   $$('[data-day]', v).forEach((c) => (c.onclick = () => scheduleModal({ date: c.dataset.day })));
 };
+
+
+// ---------- edit an image / make a new version of a video ----------
+function editModal(kind, src) {
+  const isImg = kind === 'image';
+  modal(`<h2>${isImg ? 'تعديل الصورة' : 'نسخة معدّلة من الفيديو'}</h2>
+    <div class="mt12">${mediaHTML({ type: kind, url: src.url }, 260)}</div>
+    <p class="muted sm mt12">${isImg ? 'قل ما تريد تغييره فقط، والباقي يبقى كما هو. تُحفظ كنسخة جديدة والأصل لا يتغيّر.' : 'نماذج الفيديو لا تعدّل الفيديو نفسه، بل تولّد نسخة جديدة بنفس الإعدادات مع التغيير الذي تطلبه. الأصل يبقى محفوظاً.'}</p>
+    <label class="lbl">التعديل المطلوب</label>
+    <textarea class="field" id="einst" data-mic rows="3" maxlength="1500" placeholder="${isImg ? 'مثلاً: غيّر لون الكنبة إلى الأخضر، وأضف نظارات شمسية على الطاولة' : 'مثلاً: اجعل الحركة أبطأ، والإضاءة مسائية، والأب يبتسم للكاميرا في النهاية'}"></textarea>
+    ${isImg ? '' : `<label class="lbl">التعليق الصوتي (اختياري)</label><textarea class="field" id="evo" data-mic rows="2" maxlength="500">${esc(src.voiceover || '')}</textarea>`}
+    <div class="opts mt12">${(isImg ? ['خلفية أبسط', 'إضاءة أدفأ', 'أضف الشعار في الزاوية', 'منتج أوضح وأكبر', 'أسلوب أكثر فخامة'] : ['حركة كاميرا أبطأ', 'إضاءة مسائية', 'ابدأ بلقطة قريبة للمنتج', 'طاقة أعلى وإيقاع أسرع']).map((x) => `<button class="opt" data-q="${x}">${x}</button>`).join('')}</div>
+    <div class="foot"><button class="btn ghost" data-x>إلغاء</button><button class="btn primary" id="esave" data-busy="${isImg ? 'يعدّل…' : 'يبدأ…'}">${ic('sparkle')}${isImg ? 'عدّل الصورة' : 'ولّد النسخة'}</button></div>`, (m) => {
+    $('[data-x]', m).onclick = closeModal;
+    $$('[data-q]', m).forEach((q) => (q.onclick = () => { const t = $('#einst'); t.value = (t.value ? t.value + '، ' : '') + q.dataset.q; }));
+    $('#esave').onclick = () => busy($('#esave'), async () => {
+      const instruction = $('#einst').value.trim();
+      if (!instruction) return toast('اكتب التعديل المطلوب', true);
+      try {
+        if (isImg) {
+          const img = await api(`/api/brands/${S.brand.id}/images/${src.id}/edit`, { method: 'POST', body: { instruction, ai: aiOf('image') } });
+          S.images = [img, ...(S.images || [])]; closeModal(); toast(`نسخة v${img.version} جاهزة · ${img.model}`); fallbackNote(img);
+          if (S.page === 'studio') drawStudio();
+        } else {
+          const job = await api(`/api/brands/${S.brand.id}/videos/${src.id}/edit`, { method: 'POST', body: { instruction, voiceover: $('#evo').value, ai: aiOf('video') } });
+          S.videos = [job, ...(S.videos || [])]; closeModal(); toast(`بدأت النسخة v${job.version} · ${job.model}`);
+          if (S.page === 'studio') drawVideo();
+        }
+      } catch (e) { toast(e.message, true); }
+    });
+  });
+}
 
 // ---------- setup (database not connected yet) ----------
 function renderSetup(st) {
