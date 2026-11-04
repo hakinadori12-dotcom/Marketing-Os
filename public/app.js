@@ -261,7 +261,7 @@ function renderShell() {
   </div>`;
   $('[data-pills="theme"]').style.display = 'flex';
   $$('[data-pills="theme"] button').forEach((x) => (x.style.flex = '1'));
-  $$('#nav a').forEach((a) => { a.onclick = () => go(a.dataset.p); a.onkeydown = (e) => e.key === 'Enter' && go(a.dataset.p); });
+  $$('#nav a').forEach((a) => { a.onclick = () => go(a.dataset.p); a.onkeydown = (e) => { if (e.key === 'Enter') go(a.dataset.p); }; });
   $('#brandBtn').onclick = (e) => brandMenu(e.currentTarget);
   $('#logout').onclick = async () => { await api('/api/logout', { method: 'POST' }).catch(() => {}); location.hash = ''; renderLogin(); };
   $('#bd').onclick = () => toggleSide(false);
@@ -355,7 +355,7 @@ function newBrandModal() {
       } catch (e) { toast(e.message, true); }
     });
     $('#bc').onclick = submit;
-    $('#bn').onkeydown = (e) => e.key === 'Enter' && submit();
+    $('#bn').onkeydown = (e) => { if (e.key === 'Enter') submit(); };
   });
 }
 
@@ -586,7 +586,7 @@ function bindBrain(v) {
       f.onkeydown = (e) => { if (e.key === 'Enter' && (!multi || e.metaKey || e.ctrlKey)) { e.preventDefault(); save(); } };
     };
     el.onclick = start;
-    el.onkeydown = (e) => e.key === 'Enter' && start();
+    el.onkeydown = (e) => { if (e.key === 'Enter') start(); };
   });
   $$('[data-confirm]', v).forEach((c) => (c.onclick = async () => {
     const k = c.dataset.confirm;
@@ -834,7 +834,7 @@ function drawVoice({ loading = false, pool } = {}) {
   $$('[data-v]', v).forEach((el) => {
     const pick = () => { S.voiceId = el.dataset.v; store.set('mos-voice', S.voiceId); $$('.voice', v).forEach((x) => x.classList.toggle('on', x === el)); };
     el.onclick = (e) => { if (!e.target.closest('[data-pv]')) pick(); };
-    el.onkeydown = (e) => e.key === 'Enter' && pick();
+    el.onkeydown = (e) => { if (e.key === 'Enter') pick(); };
   });
   $$('[data-pv]', v).forEach((b) => (b.onclick = (e) => {
     e.stopPropagation();
@@ -1047,7 +1047,7 @@ function connectModal(p) {
       try { const r = await api(`/api/providers/${p.id}`, { method: 'PUT', body }); closeModal(); toast(r.status === 'active' ? `تم ربط ${p.name} ✓` : `تم الحفظ (${PST[r.status]?.[0] || r.status})`); S.ov = null; await loadProviders(); if (S.page === 'providers') drawProviders(); } catch (err) { toast(err.message, true); }
     });
     $('#pcs').onclick = save;
-    $$('[data-f]', m).forEach((i) => (i.onkeydown = (e) => e.key === 'Enter' && save()));
+    $$('[data-f]', m).forEach((i) => (i.onkeydown = (e) => { if (e.key === 'Enter') save(); }));
   });
 }
 
