@@ -439,6 +439,23 @@ module.exports = async (req, res) => {
       if (ro && method === 'PATCH') return send(res, 200, await research.setOpportunity(id, ro[1], (await readBody(req)).status));
       if (sub === 'identity/palettes' && method === 'POST') return send(res, 200, { palettes: await identity.palettes(id, await readBody(req)) });
       if (sub === 'identity/logos' && method === 'POST') return send(res, 200, await identity.logos(id, await readBody(req)));
+      if (sub === 'enhance' && method === 'POST') { const body = await readBody(req); return send(res, 200, { text: await content.enhanceText(id, body.text, String(body.kind || 'content')) }); }
+      if (sub === 'voice/script' && method === 'POST') return send(res, 200, await content.voiceScript(id, await readBody(req)));
+      if (sub === 'design/copy' && method === 'POST') return send(res, 200, await content.designCopy(id, await readBody(req)));
+      if (sub === 'images/design' && method === 'POST') return send(res, 200, await content.saveDesign(id, await readBody(req)));
+      if (sub === 'proxy' && method === 'GET') {
+        // Same-origin copy of a stored image (canvas design editor + image conversion need it).
+        const u = String(query.get('u') || '');
+        let buf; let type;
+        const fm = u.match(/^\/api\/file\/([a-f0-9]+)$/);
+        if (fm) { const f = await store.readFile(fm[1]); if (!f) throw httpError(404, 'غير موجود'); buf = f.buffer; type = f.contentType; }
+        else if (/^https:\/\/[a-z0-9.-]+\.(public\.)?blob\.vercel-storage\.com\//.test(u)) { const r = await fetch(u); if (!r.ok) throw httpError(404, 'غير موجود'); buf = Buffer.from(await r.arrayBuffer()); type = r.headers.get('content-type'); }
+        else throw httpError(400, 'رابط غير مسموح');
+        res.statusCode = 200;
+        res.setHeader('Content-Type', type || 'application/octet-stream');
+        res.setHeader('Cache-Control', 'private, max-age=3600');
+        return res.end(buf);
+      }
       if (sub === 'uploads' && method === 'POST') {
         const body = await readBody(req);
         const m = String(body.dataUrl || '').match(/^data:(image\/(png|jpeg|webp));base64,(.+)$/);

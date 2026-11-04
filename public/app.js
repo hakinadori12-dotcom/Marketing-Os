@@ -299,7 +299,26 @@ function brandAvatar(b, cls = '') {
     : `<span class="av ${cls}" style="background:${esc(b.color || '#111')}">${esc((b.name || '?').trim().charAt(0))}</span>`;
 }
 
+// The platform takes the active brand's colours (only colours: buttons, selection, highlights).
+function hexMix(hex, to, t) { const a = String(hex).replace('#', ''); const c = [0, 2, 4].map((i) => parseInt(a.slice(i, i + 2), 16)); const d = to === 'w' ? 255 : 0; return '#' + c.map((x) => Math.round(x + (d - x) * t).toString(16).padStart(2, '0')).join(''); }
+function applyBrandTheme() {
+  const r = document.documentElement.style;
+  const c = (S.brand?.visual?.colors || []).find((x) => /^#[0-9a-f]{6}$/i.test(x) && lum(x) > 0.02 && lum(x) < 0.85);
+  const on = store.get('mos-brandui') !== 'off';
+  if (!c || !on) { ['--brand', '--brand-text', '--brand-soft', '--brand-2'].forEach((k) => r.removeProperty(k)); document.documentElement.classList.remove('branded'); return; }
+  const dark = document.documentElement.dataset.theme === 'dark';
+  let main = c;
+  if (dark && lum(main) < 0.12) main = hexMix(main, 'w', 0.35);
+  if (!dark && lum(main) > 0.6) main = hexMix(main, 'b', 0.35);
+  const second = (S.brand.visual.colors || []).find((x) => x !== c && /^#[0-9a-f]{6}$/i.test(x)) || hexMix(main, 'w', 0.4);
+  r.setProperty('--brand', main);
+  r.setProperty('--brand-text', onColor(main));
+  r.setProperty('--brand-soft', dark ? hexMix(main, 'b', 0.78) : hexMix(main, 'w', 0.9));
+  r.setProperty('--brand-2', second);
+  document.documentElement.classList.add('branded');
+}
 function renderShell() {
+  applyBrandTheme();
   const theme = document.documentElement.dataset.theme;
   const b = S.brand;
   $('#root').innerHTML = `<div class="app">
@@ -310,6 +329,7 @@ function renderShell() {
         `<a data-p="${k}" tabindex="0" class="${S.page === k ? 'on' : ''}">${ic(k)}${esc(l)}${phase ? `<span class="soon">م${phase}</span>` : ''}</a>`).join('')}</nav>
       <div class="side-foot">
         ${pills('theme', [['light', 'فاتح'], ['dark', 'داكن']], theme)}
+        ${(b?.visual?.colors || []).length ? `<label class="flex xs" style="cursor:pointer;padding:0 6px"><input type="checkbox" class="check" id="brandui" ${store.get('mos-brandui') !== 'off' ? 'checked' : ''}>ألوان ${esc(b.name)} في الواجهة <span class="grow"></span>${b.visual.colors.slice(0, 3).map((x) => `<span class="dot" style="background:${x}"></span>`).join('')}</label>` : ''}
         <div class="userrow"><span class="av" style="background:var(--btn);color:var(--btn-text)">${esc((S.user?.name || 'ح').charAt(0))}</span><span class="grow sm">${esc(S.user?.name || '')}</span><button class="btn grey icon sm" id="logout" title="خروج">${ic('logout', 'rtl-flip')}</button></div>
       </div>
     </aside>
@@ -317,6 +337,7 @@ function renderShell() {
     <main class="main"><header class="head" id="head"></header><div id="view"></div></main>
   </div>
   <button class="assist-fab" id="assist" title="المساعد الصوتي: قل ما تريد">${ic('voice')}<span>تكلّم</span></button>`;
+  $('#brandui') && ($('#brandui').onchange = (e) => { store.set('mos-brandui', e.target.checked ? 'on' : 'off'); applyBrandTheme(); });
   $('[data-pills="theme"]').style.display = 'flex';
   $$('[data-pills="theme"] button').forEach((x) => (x.style.flex = '1'));
   $$('#nav a').forEach((a) => { a.onclick = () => go(a.dataset.p); a.onkeydown = (e) => { if (e.key === 'Enter') go(a.dataset.p); }; });
@@ -387,7 +408,7 @@ document.addEventListener('click', (e) => {
   placePills(p.parentElement);
   const key = p.dataset.pills;
   const v = b.dataset.v;
-  if (key === 'theme') { document.documentElement.dataset.theme = v; store.set('mos-theme', v); }
+  if (key === 'theme') { document.documentElement.dataset.theme = v; store.set('mos-theme', v); applyBrandTheme(); }
   if (key === 'brain') { S.brainTab = v; PAGES.brain(); }
   if (key === 'kf') { S.keyFilter = v; S.keyLimit = 50; drawKeys(); }
   if (key === 'ctab') { S.ctab = v; S.batch = null; PAGES.create(); }
@@ -568,12 +589,12 @@ function brainIdentity() {
 
 function brainProducts() {
   const p = S.brand.products;
-  const missing = p.filter((x) => !x.photo).length;
+  const missing = p.filter((x) => !x.photo && x.kind !== 'service').length;
   return `<div class="grid c12"><div class="card s8"><div class="card-h"><h3>المنتجات والخدمات</h3><div class="end">${missing ? chip(`${missing} بدون صورة`, 'am') : ''}<span class="muted xs">${p.length} عنصر</span></div></div>
     ${missing ? `<div class="inset sm mb16">صورة المنتج <b>إلزامية</b> لتوليد صوره: الذكاء الاصطناعي يستعملها كمرجع حتى يُظهر نفس المنتج بالضبط ولا يخترع منتجاً آخر. اضغط «تعديل» لإضافة الصورة والسعر.</div>` : ''}
     ${p.length ? `<div class="tablewrap"><table><thead><tr><th>الصورة</th><th>الاسم</th><th>السعر</th><th>الوصف</th><th>المصدر</th><th></th></tr></thead><tbody>
       ${p.map((x) => `<tr><td>${x.photo ? `<img src="${esc(x.photo)}" alt="" style="width:52px;height:52px;object-fit:cover;border-radius:10px;display:block">` : `<button class="btn grey sm" data-ep="${x.id}">${ic('upload')}صورة</button>`}</td>
-      <td><b>${esc(x.name)}</b></td><td class="tnum">${x.price ? esc(x.price) : `<button class="btn ghost sm" data-ep="${x.id}">+ السعر</button>`}</td><td class="sec sm">${esc(x.description || '')}</td><td>${chip(SRC[x.source]?.[0] || 'مؤكد', SRC[x.source]?.[1] || 'em')}</td>
+      <td><b>${esc(x.name)}</b>${x.kind === 'service' ? ` ${chip('خدمة', 'sk', false)}` : ''}${x.category ? `<div class="xs muted">${esc(x.category)}</div>` : ''}</td><td class="tnum">${x.price ? esc(x.price) : `<button class="btn ghost sm" data-ep="${x.id}">+ السعر</button>`}</td><td class="sec sm">${esc(x.description || '')}</td><td>${chip(SRC[x.source]?.[0] || 'مؤكد', SRC[x.source]?.[1] || 'em')}</td>
       <td><div class="flex" style="gap:6px"><button class="btn grey sm" data-ep="${x.id}">${ic('edit')}تعديل</button><button class="btn grey icon sm" data-delp="${x.id}" aria-label="حذف">${ic('trash')}</button></div></td></tr>`).join('')}</tbody></table></div>`
     : `<div class="empty" style="padding:28px"><span class="ic">${ic('studio')}</span><h3>لا توجد منتجات بعد</h3><p>أضف منتجاتك يدوياً أو استخرجها من الموقع عبر التحليل الذكي.</p></div>`}
   </div>
@@ -679,21 +700,29 @@ function brainVisual() {
 function brainAnalyze() {
   const a = S.analysis;
   const b = S.brand;
-  const res = !a ? '' : `<div class="card mt16"><div class="card-h"><h3>النتيجة</h3>${a.site ? `<div class="end"><span class="muted xs ltr">${esc(a.site.url)}</span></div>` : ''}</div>
-    <p class="muted sm mb16">اختر ما تريد حفظه. الحقول التي فيها قيمة الآن غير محددة مسبقاً حتى لا تُستبدل.</p>
-    ${b.fieldDefs.filter(([k]) => a.fields[k]).map(([k, l]) => `<label class="prop" style="cursor:pointer"><span class="k"><input type="checkbox" class="check" data-af="${k}" ${b.fields[k]?.value ? '' : 'checked'}>${esc(l)}</span>
-      <span class="v"><span class="grow">${esc(a.fields[k].value)}${b.fields[k]?.value ? `<div class="muted xs mt8">الحالي: ${esc(b.fields[k].value)}</div>` : ''}</span>${chip(SRC[a.fields[k].source][0], SRC[a.fields[k].source][1])}</span></label>`).join('')}
-    ${a.products.length ? `<span class="lbl">المنتجات (${a.products.length})</span><div class="rows">${a.products.map((p, i) => `<label class="row-i" style="cursor:pointer"><input type="checkbox" class="check" data-ap="${i}" ${b.products.some((x) => x.name === p.name) ? '' : 'checked'}><div class="t"><b>${esc(p.name)}</b><small>${esc([p.price, p.description].filter(Boolean).join(' · '))}</small></div></label>`).join('')}</div>` : ''}
-    ${a.competitors?.competitors?.length ? `<span class="lbl">المنافسون (${a.competitors.competitors.length})</span><div class="flex wrap">${a.competitors.competitors.map((c) => chip(c.name, c.status === 'researched' ? 'em' : '', false)).join('')}<button class="btn grey sm" data-go="research">${ic('research')}افتح بحث المنافسين</button></div>` : ''}
-    ${a.colors.length ? `<span class="lbl">ألوان من الموقع</span><div class="flex wrap" style="gap:10px">${a.colors.map((c) => `<label class="flex" style="cursor:pointer"><input type="checkbox" class="check" data-ac="${c}" ${(b.visual?.colors || []).includes(c) ? '' : 'checked'}><span class="swatch" style="background:${c};width:32px;height:32px"></span><span class="mono xs ltr">${c}</span></label>`).join('')}</div>` : ''}
-    <div class="flex mt16" style="justify-content:flex-end"><button class="btn ghost" id="adisc">تجاهل</button><button class="btn primary" id="aapply">${ic('check')}حفظ المحدد</button></div></div>`;
+  const BT = { ecommerce: 'متجر إلكتروني', services: 'خدمات', both: 'منتجات وخدمات', other: 'نشاط آخر' };
+  const sug = a ? Object.entries(a.suggestions || {}) : [];
+  const res = !a ? '' : `<div class="card mt16"><div class="card-h"><span class="ic">${ic('check')}</span><h3>تم ملء عقل البراند</h3><div class="end">${chip(BT[a.businessType] || '', 'vi', false)}<span class="muted xs">${esc(a.via || '')}</span></div></div>
+    ${a.understanding ? `<div class="inset sm"><b>فهمت براندك هكذا:</b><p class="mt8 sec">${esc(a.understanding)}</p></div>` : ''}
+    <div class="grid c4 mt12">
+      <div class="inset"><div class="num" style="font-size:24px;font-weight:600">${a.filled.length}</div><div class="xs muted">حقل فارغ مُلئ</div></div>
+      <div class="inset"><div class="num" style="font-size:24px;font-weight:600">${a.products.added}</div><div class="xs muted">${a.businessType === 'services' ? 'خدمة' : 'منتج/خدمة'} جديد${a.products.catalogue ? ` · من ${esc(a.products.platform)}` : ''}</div></div>
+      <div class="inset"><div class="num" style="font-size:24px;font-weight:600">${a.products.photos}</div><div class="xs muted">صورة منتج من المتجر</div></div>
+      <div class="inset"><div class="num" style="font-size:24px;font-weight:600">${a.site ? a.site.pages + 1 : 0}</div><div class="xs muted">صفحة قُرئت${a.web ? ' + بحث الإنترنت' : ''}</div></div>
+    </div>
+    ${a.filled.length ? `<p class="xs muted mt12">مُلئت: ${a.filled.map((k) => esc((b.fieldDefs.find(([x]) => x === k) || [k, k])[1])).join('، ')}. كل حقل موسوم بمصدره (مستخرج / مستنتج)، وتقدر تعدّله في «الهوية».</p>` : ''}
+    ${sug.length ? `<span class="lbl">اقتراحات لحقول عندك فيها قيمة (لن تُستبدل إلا إذا اخترت)</span>
+      ${sug.map(([k, f]) => `<label class="prop" style="cursor:pointer"><span class="k"><input type="checkbox" class="check" data-af="${k}">${esc((b.fieldDefs.find(([x]) => x === k) || [k, k])[1])}</span><span class="v"><span class="grow">${esc(f.value)}<div class="muted xs mt8">الحالي: ${esc(b.fields[k]?.value || '')}</div></span>${chip(SRC[f.source][0], SRC[f.source][1])}</span></label>`).join('')}
+      <div class="flex mt12" style="justify-content:flex-end"><button class="btn grey" id="aapply">${ic('check')}استبدل المحدد</button></div>` : ''}
+    ${a.competitors?.competitors?.length ? `<span class="lbl">المنافسون (${a.competitors.competitors.length})</span><div class="flex wrap">${a.competitors.competitors.slice(0, 12).map((c) => chip(c.name, c.status === 'researched' ? 'em' : '', false)).join('')}<button class="btn grey sm" data-go="research">${ic('research')}افتح بحث المنافسين</button></div>` : ''}
+    <div class="flex mt16" style="justify-content:flex-end"><button class="btn ghost" id="adisc">إغلاق</button><button class="btn primary" data-tab="products">${ic('studio')}راجع المنتجات (${a.products.total})</button></div></div>`;
   return `<div class="grid c12"><div class="card s8"><div class="card-h"><h3>التحليل الذكي</h3><div class="end" style="min-width:240px">${pickerHTML('text')}</div></div>
-    <p class="muted sm">النظام يقرأ موقعك و/أو ملاحظاتك ويقترح الحقول. كل اقتراح موسوم بمصدره، ولا يُحفظ شيء قبل موافقتك.</p>
+    <p class="muted sm">يقرأ موقعك كاملاً (الرئيسية، من نحن، الخدمات، المتجر…) وكل منتجاتك بأسعارها وصورها إن كان متجراً، ويبحث عن براندك في الإنترنت، ثم يملأ <b>كل الحقول الفارغة</b> تلقائياً. الحقول التي كتبتها أنت لا تُستبدل.</p>
     <label class="lbl">رابط الموقع</label><input class="field ltr" id="aurl" value="${esc(b.website)}" placeholder="example.com" style="text-align:left">
     <label class="lbl">ملاحظات عن البراند (اختياري)</label><textarea class="field" id="atext" data-mic rows="4" placeholder="مثلاً: نبيع مستحضرات طبيعية بزيت الأرغان للنساء في المغرب، أسلوبنا دافئ وبالدارجة…"></textarea>
     <label class="flex sm mt12" style="cursor:pointer"><input type="checkbox" class="check" id="acomp" checked>ابحث أيضاً عن المنافسين في الإنترنت (يضافون لصفحة بحث المنافسين)</label>
     <input class="field mt8" id="aseeds" placeholder="منافسون تعرفهم (اختياري): Optic 2000، Atlas Optique…">
-    <div class="flex mt16" style="justify-content:flex-end"><button class="btn primary" id="arun" data-busy="يحلّل…">${ic('sparkle')}تحليل</button></div>
+    <div class="flex mt16" style="justify-content:flex-end"><button class="btn primary" id="arun" data-busy="يقرأ الموقع ويحلّل… حتى دقيقتين">${ic('sparkle')}تحليل وملء عقل البراند</button></div>
     ${res}</div><div class="stack s4">${readinessCard()}</div></div>`;
 }
 
@@ -806,28 +835,20 @@ function bindBrain(v) {
   $('#arun', v) && ($('#arun').onclick = (e) => busy(e.currentTarget, async () => {
     try {
       S.analysis = await api(`/api/brands/${b.id}/analyze`, { method: 'POST', body: { url: $('#aurl').value.trim(), text: $('#atext').value, ai: aiOf('text'), competitors: $('#acomp').checked, seeds: $('#aseeds').value } });
+      S.brand = S.analysis.brand; renderShell();
       const cp = S.analysis.competitors;
       if (cp?.error) toast(`البحث عن المنافسين: ${cp.error}`, true);
-      else if (cp?.found) toast(`وجدت ${cp.found.length} منافس جديد · ${cp.web ? 'من الإنترنت' : 'بدون بحث على الإنترنت'}`);
-      if (!Object.keys(S.analysis.fields).length && !S.analysis.products.length) toast('لم أجد معلومات كافية. أضف ملاحظات عن البراند.', true);
-      PAGES.brain();
+      toast(`مُلئ ${S.analysis.filled.length} حقل · ${S.analysis.products.added} منتج جديد`);
+      go('brain', { replace: true });
     } catch (err) { toast(err.message, true); }
   }));
   $('#adisc', v) && ($('#adisc').onclick = () => { S.analysis = null; PAGES.brain(); });
   $('#aapply', v) && ($('#aapply').onclick = (e) => busy(e.currentTarget, async () => {
     const a = S.analysis;
     const fields = {};
-    $$('[data-af]:checked', v).forEach((c) => (fields[c.dataset.af] = a.fields[c.dataset.af]));
-    const products = $$('[data-ap]:checked', v).map((c) => a.products[Number(c.dataset.ap)]);
-    const colors = $$('[data-ac]:checked', v).map((c) => c.dataset.ac);
-    const body = {};
-    if (Object.keys(fields).length) body.fields = fields;
-    if (products.length) body.products = [...b.products, ...products];
-    if (colors.length) body.visual = { colors: [...new Set([...(b.visual?.colors || []), ...colors])].slice(0, 8) };
-    const url = $('#aurl').value.trim();
-    if (url && url !== b.website) body.website = url;
-    if (!Object.keys(body).length) return toast('لم تحدد أي شيء', true);
-    try { S.analysis = null; S.brainTab = 'identity'; await patchBrand(body); toast('تم الحفظ في عقل البراند'); } catch (err) { toast(err.message, true); }
+    $$('[data-af]:checked', v).forEach((c) => (fields[c.dataset.af] = a.suggestions[c.dataset.af]));
+    if (!Object.keys(fields).length) return toast('لم تحدد أي شيء', true);
+    try { Object.keys(fields).forEach((k) => delete a.suggestions[k]); await patchBrand({ fields }); toast('تم الاستبدال'); } catch (err) { toast(err.message, true); }
   }));
 }
 
@@ -991,8 +1012,8 @@ function drawVoice({ loading = false, pool } = {}) {
   const model = S.models.find((m) => m.id === t.modelId) || S.models[0];
   const slider = (key, label, min, max, step, val, fmtv) => `<div><div class="flex"><span class="sm sec grow">${label}</span><b class="xs tnum" id="sv-${key}">${fmtv(val)}</b></div><input type="range" data-sl="${key}" min="${min}" max="${max}" step="${step}" value="${val}"></div>`;
   const v = view(`<div class="grid c12">
-    <div class="card s7"><div class="card-h"><h3>تعليق صوتي</h3><div class="end">${chip('ElevenLabs', '', false)}${pool ? chip(`${pool.active} مفتاح · ${short(pool.remaining)} حرف`, 'em') : ''}</div></div>
-      <textarea class="field" id="vt" data-mic rows="5" maxlength="5000" placeholder="اكتب النص الذي تريد تحويله إلى صوت…">${esc(t.text)}</textarea>
+    <div class="card s7"><div class="card-h"><h3>تعليق صوتي</h3><div class="end"><button class="btn primary sm" id="vscript">${ic('sparkle')}اكتب لي السكريبت</button>${chip('ElevenLabs', '', false)}${pool ? chip(`${pool.active} مفتاح · ${short(pool.remaining)} حرف`, 'em') : ''}</div></div>
+      <textarea class="field" id="vt" data-mic data-enhance="voice" rows="5" maxlength="5000" placeholder="اكتب النص الذي تريد تحويله إلى صوت…">${esc(t.text)}</textarea>
       <div class="flex mt8"><span class="hint grow" style="margin:0">يمكنك الكتابة بالدارجة أو الفصحى أو الفرنسية.</span><span class="xs tnum muted" id="vc">${t.text.length}/5000</span></div>
       <div class="grid c2 mt16" style="gap:12px">
         <div><span class="lbl" style="margin-top:0">النموذج</span><div class="sel"><button class="sel-btn" id="vm" data-menu><span class="lab">${esc(model.name)} <span class="muted xs">· ${esc(model.note)}</span></span>${ic('chev')}</button></div></div>
@@ -1019,6 +1040,7 @@ function drawVoice({ loading = false, pool } = {}) {
         <div class="muted xs">${fmt(a.chars)} حرف · ${esc(a.model || '')}</div></div>`).join('')}</div>`
         : `<div class="empty" style="padding:28px"><span class="ic">${ic('voice')}</span><h3>لا توجد تسجيلات</h3><p>اكتب نصاً واختر صوتاً ثم اضغط توليد.</p></div>`}</div>
     </div></div>`);
+  $('#vscript', v).onclick = () => scriptModal((r) => { t.text = r.script; drawVoice({ pool }); if (r.voiceHint) toast(`الصوت المناسب: ${r.voiceHint}`); });
   const ta = $('#vt', v);
   ta.oninput = () => { t.text = ta.value; $('#vc').textContent = `${ta.value.length}/5000`; $('#vcost').textContent = ta.value.length ? `سيستهلك حوالي ${fmt(ta.value.length)} حرف من رصيد المفاتيح` : ''; };
   $$('[data-sl]', v).forEach((r) => (r.oninput = () => { const k = r.dataset.sl; t[k] = Number(r.value); $(`#sv-${k}`).textContent = k === 'speed' ? Number(r.value).toFixed(2) + '×' : Math.round(r.value * 100) + '%'; }));
@@ -1393,13 +1415,14 @@ async function drawCreate() {
       <div class="sel"><button class="sel-btn" id="cprod" data-menu><span class="lab">${prod ? esc(prod.name) : b.products.length ? 'البراند كاملاً (بدون منتج محدد)' : 'البراند كاملاً · أضف منتجات من عقل البراند'}</span>${ic('chev')}</button></div>
       <span class="lbl">المنصات</span>${optsRow('platforms', o.PLATFORMS, f.platforms, true)}
       <span class="lbl">نوع المحتوى <span class="muted xs" style="font-weight:400">· اختر حتى 3 أنواع في نفس الطلب</span></span>${optsRow('types', o.TYPES, f.types, true)}
+      <div id="cslides">${f.types.includes('carousel') ? `<span class="lbl">عدد شرائح الكاروسيل</span><div class="opts" data-opts="slides">${[3, 4, 5, 6, 7, 8, 10].map((n) => `<button class="opt ${(f.slides || 6) === n ? 'on' : ''}" data-k="${n}">${n}</button>`).join('')}</div>` : ''}</div>
       <span class="lbl">الهدف</span>${optsRow('goal', o.GOALS, f.goal)}
       <div class="grid c2" style="gap:12px">
         <div><span class="lbl">اللغة / اللهجة</span>${optsRow('dialect', o.DIALECTS, f.dialect)}</div>
         <div><span class="lbl">إطار الكتابة</span>${optsRow('framework', o.FRAMEWORKS, f.framework)}</div>
       </div>
       <span class="lbl">الفكرة أو ملاحظاتك (اختياري)</span>
-      <textarea class="field" id="cidea" data-mic rows="3" maxlength="1500" placeholder="مثلاً: عرض خاص 20% بمناسبة العودة للمدارس، ركّز على الجودة والتوصيل السريع…">${esc(f.idea)}</textarea>
+      <textarea class="field" id="cidea" data-mic data-enhance="content" rows="3" maxlength="1500" placeholder="مثلاً: عرض خاص 20% بمناسبة العودة للمدارس، ركّز على الجودة والتوصيل السريع…">${esc(f.idea)}</textarea>
       ${occ.length ? `<span class="lbl">مناسبات هذا الشهر <span class="muted xs" style="font-weight:400">· ${occMarket ? `حسب سوقك: ${esc(occMarket)}` : 'حدّد السوق في عقل البراند لتظهر مناسبات بلدك'}</span></span><div class="opts" id="cocc">${occ.map((x) => `<button class="opt ${f.occasion === x.name ? 'on' : ''}" data-o="${esc(x.name)}">${esc(x.name)} <span class="muted xs ltr">${x.date.slice(5)}</span></button>`).join('')}</div>` : ''}
       <div class="flex mt16"><span class="sm sec">${f.types.length > 1 ? 'العدد لكل نوع' : 'العدد'}</span><div class="pills" data-pills="count">${[1, 3, 5, 7, 10].map((n) => `<button data-v="${n}" class="${n === f.count ? 'on' : ''}">${n}</button>`).join('')}</div><span class="grow"></span>
         <button class="btn primary" id="cgo" data-busy="يكتب… قد يستغرق دقيقة">${ic('sparkle')}توليد المحتوى</button></div>
@@ -1414,6 +1437,8 @@ async function drawCreate() {
       </div>
     </div></div>`);
   bindOpts(v, f, ['platforms', 'types'], { types: 3 });
+  $$('[data-opts="types"] .opt', v).forEach((x) => x.addEventListener('click', () => { if (x.dataset.k === 'carousel') drawCreate(); }));
+  $$('[data-opts="slides"] .opt', v).forEach((x) => x.addEventListener('click', () => (f.slides = Number(x.dataset.k))));
   bindPicker(v, () => drawCreate());
   $$('[data-go]', v).forEach((x) => (x.onclick = () => go(x.dataset.go)));
   $$('[data-tab]', v).forEach((x) => (x.onclick = () => { S.ctab = x.dataset.tab; PAGES.create(); }));
@@ -1470,16 +1495,18 @@ function drawBatch() {
       ${it.score ? `<div class="verdict ${it.best ? 'best' : ''}"><b>${it.best ? '★ الأفضل في هذه الدفعة · ' : ''}${it.score}/10</b><span>${esc(it.why || '')}</span></div>` : ''}
       <p class="hook">${esc(it.hook)}</p>
       <p class="cap">${esc(it.caption)}</p>
+      ${it.cards?.length ? `<div class="cards-ed"><div class="flex"><b class="sm grow">الشرائح (${it.cards.length})</b><button class="btn ghost sm" data-a="cards">${ic('edit')}تعديل الشرائح</button></div>
+        <div class="cards-row">${it.cards.map((c, i) => `<div class="cardlet">${c.image?.url ? `<img src="${esc(c.image.url)}" alt="">` : ''}<span class="n">${i + 1}</span><b>${esc(c.headline)}</b>${c.body ? `<p>${esc(c.body)}</p>` : ''}</div>`).join('')}</div></div>` : ''}
       ${it.slides?.length ? `<ol class="slides">${it.slides.map((x) => `<li>${esc(x)}</li>`).join('')}</ol>` : ''}
       ${it.cta ? `<p class="sm mt8"><b>CTA:</b> ${esc(it.cta)}</p>` : ''}
       ${it.hashtags?.length ? `<p class="tags">${it.hashtags.map((h) => '#' + esc(h)).join(' ')}</p>` : ''}
-      <div class="inset mt12 xs"><b>فكرة البصري:</b> ${esc(it.visual)}</div>
+      <div class="inset mt12 xs vis" data-vis><div class="flex" style="align-items:flex-start"><span class="grow"><b>فكرة البصري:</b> <span class="vtxt">${esc(it.visual)}</span></span><button class="btn grey icon sm" data-a="visual" aria-label="تعديل فكرة البصري" title="تعديل فكرة البصري">${ic('edit')}</button></div></div>
       <div class="flex wrap mt12">
         <button class="btn grey sm" data-a="copy">${ic('copy')}نسخ</button>
         <button class="btn grey sm" data-a="edit">${ic('edit')}تعديل</button>
         <button class="btn grey sm" data-a="rewrite">${ic('refresh')}إعادة بملاحظة</button>
         <button class="btn grey sm" data-a="schedule">${ic('calendar')}جدولة</button>
-        <button class="btn grey sm" data-a="image" data-job="img-${it.id}" data-busy="يصمم…">${ic('studio')}${it.image ? 'صورة أخرى' : 'صمّم الصورة'}</button>
+        <button class="btn grey sm" data-a="image">${ic('studio')}${it.image ? 'عدّل التصميم' : it.cards?.length ? 'صمّم الشرائح' : 'صمّم'}</button>
         <span class="grow"></span>
         <button class="btn ${it.status === 'approved' ? 'ghost' : 'primary'} sm" data-a="approve">${ic('check')}${it.status === 'approved' ? 'إلغاء' : 'اعتماد'}</button>
       </div></div>`).join('')}</div>`);
@@ -1508,20 +1535,85 @@ function drawBatch() {
         $$('[data-q]', m).forEach((q) => (q.onclick = () => { const t = $('#rf'); t.value = (t.value ? t.value + '، ' : '') + q.dataset.q; }));
         $('#rs').onclick = () => busy($('#rs'), async () => { try { const n = await api(url(it) + '/rewrite', { method: 'POST', body: { feedback: $('#rf').value, ai: aiOf('text') } }); closeModal(); replace(n); toast('تمت إعادة الكتابة'); } catch (err) { toast(err.message, true); } });
       });
-      if (a === 'image') {
-        const prod = S.brand.products.find((p) => p.id === bt.params?.productId);
-        if (prod && !prod.photo) return productPhotoModal(prod, () => btn.isConnected && btn.click());
+      if (a === 'visual') {
+        const box = btn.closest('[data-vis]');
+        box.innerHTML = `<b>فكرة البصري</b><textarea class="field mt8" rows="3" data-enhance="image">${esc(it.visual)}</textarea><div class="flex mt8"><button class="btn primary sm" data-vs>حفظ</button><button class="btn ghost sm" data-vc>إلغاء</button></div>`;
+        enhancePrompts(box);
+        const ta = $('textarea', box); ta.focus();
+        $('[data-vc]', box).onclick = () => drawBatch();
+        $('[data-vs]', box).onclick = () => busy($('[data-vs]', box), async () => { try { replace(await api(url(it), { method: 'PATCH', body: { visual: ta.value.trim(), imagePrompt: '' } })); toast('حُفظت فكرة البصري'); } catch (err) { toast(err.message, true); } });
+        return;
       }
-      if (a === 'image') return busy(btn, async () => {
-        try {
-          const aspect = ['tiktok', 'snapchat'].includes(it.platform) || ['reel', 'story', 'ugc'].includes(it.type) ? '9:16' : it.platform === 'instagram' ? '4:5' : it.platform === 'x' || it.platform === 'youtube' || it.platform === 'linkedin' ? '16:9' : '1:1';
-          const img = await api(`/api/brands/${S.brand.id}/images`, { method: 'POST', body: { prompt: it.imagePrompt || it.visual, aspect, style: 'none', useColors: true, from: { batch: bt.id, item: it.id }, ai: aiOf('image') } });
-          S.images = null;
-          replace(await api(url(it), { method: 'PATCH', body: { image: { url: img.url, id: img.id } } }));
-          toast('تم تصميم الصورة');
-        } catch (err) { toast(err.message, true); }
-      });
+      if (a === 'cards') return cardsModal(it, async (cards) => replace(await api(url(it), { method: 'PATCH', body: { cards } })));
+      if (a === 'image') {
+        const aspect = ['tiktok', 'snapchat'].includes(it.platform) || ['reel', 'story', 'ugc'].includes(it.type) ? '9:16' : it.platform === 'instagram' ? '4:5' : ['x', 'youtube', 'linkedin'].includes(it.platform) ? '16:9' : '1:1';
+        const prod = S.brand.products.find((p) => p.id === bt.params?.productId);
+        if (prod && prod.kind !== 'service' && !prod.photo) return productPhotoModal(prod, () => btn.isConnected && btn.click());
+        const short = (t, n) => { const w = String(t || '').replace(/[^\p{L}\p{N}\s%!؟?.,،]/gu, '').split(/\s+/).filter(Boolean); return w.slice(0, n).join(' '); };
+        const slides = it.cards?.length
+          ? it.cards.map((c, i) => ({ headline: c.headline, sub: c.body, cta: i === it.cards.length - 1 ? it.cta : '', prompt: c.visual, bg: c.bgUrl || '' }))
+          : [{ headline: short(it.hook, 9), sub: '', cta: short(it.cta, 4), prompt: it.imagePrompt || it.visual }];
+        return designer({ aspect, productId: prod?.id || '', slides, from: { batch: bt.id, item: it.id }, auto: !it.image, onSave: async (items) => {
+          try {
+            const body = { image: { url: items[0].url, id: items[0].id } };
+            if (it.cards?.length) body.cards = it.cards.map((c, i) => ({ ...c, image: items[i] ? { url: items[i].url, id: items[i].id } : c.image }));
+            replace(await api(url(it), { method: 'PATCH', body }));
+          } catch (err) { toast(err.message, true); }
+        } });
+      }
     }));
+  });
+}
+// Voice-over script writer: the owner picks the product/service and a few options.
+function scriptModal(onDone) {
+  const b = S.brand;
+  const o = { productId: '', goal: 'ad', seconds: 30, dialect: b.fields?.languages?.value?.includes('دارج') ? 'darija' : 'msa', tone: '', cta: b.fields?.cta?.value || '', notes: '' };
+  const DIA = S.opts?.DIALECTS || { msa: 'العربية الفصحى', darija: 'الدارجة المغربية', gulf: 'الخليجية', egyptian: 'المصرية', fr: 'الفرنسية', en: 'الإنجليزية' };
+  modal(`<h2>سكريبت التعليق الصوتي</h2><p class="muted sm mt8">اختر المنتج أو الخدمة والخيارات، والذكاء الاصطناعي يكتب نصاً جاهزاً للقراءة بالمدة المطلوبة.</p>
+    <span class="lbl">عن ماذا؟</span><div class="sel"><button class="sel-btn" id="sprod" data-menu><span class="lab">البراند بشكل عام</span>${ic('chev')}</button></div>
+    <span class="lbl">الهدف</span><div class="opts" data-opts="goal">${[['ad', 'إعلان'], ['intro', 'تعريف'], ['offer', 'عرض خاص'], ['explainer', 'شرح الفوائد'], ['story', 'قصة قصيرة'], ['testimonial', 'تجربة عميل']].map(([k, l]) => `<button class="opt ${o.goal === k ? 'on' : ''}" data-k="${k}">${l}</button>`).join('')}</div>
+    <span class="lbl">المدة</span><div class="opts" data-opts="seconds">${[15, 30, 45, 60].map((n) => `<button class="opt ${o.seconds === n ? 'on' : ''}" data-k="${n}">${n} ث</button>`).join('')}</div>
+    <span class="lbl">اللهجة</span><div class="opts" data-opts="dialect">${Object.entries(DIA).map(([k, l]) => `<button class="opt ${o.dialect === k ? 'on' : ''}" data-k="${k}">${esc(String(l).split(' (')[0])}</button>`).join('')}</div>
+    <div class="grid c2" style="gap:12px"><div><label class="lbl">النبرة (اختياري)</label><input class="field" id="stone" placeholder="${esc(b.fields?.tone?.value || 'دافئة وواثقة')}"></div><div><label class="lbl">الدعوة للإجراء</label><input class="field" id="scta" value="${esc(o.cta)}" placeholder="اطلب الآن عبر الرابط"></div></div>
+    <label class="lbl">ملاحظات (اختياري)</label><textarea class="field" id="snotes" data-mic rows="2" placeholder="مثلاً: نذكر التوصيل المجاني، ونخاطب الأمهات"></textarea>
+    <div class="foot"><button class="btn ghost" data-x>إلغاء</button><button class="btn primary" id="sgo" data-busy="يكتب…">${ic('sparkle')}اكتب السكريبت</button></div>`, (m) => {
+    m.style.maxWidth = '640px';
+    bindOpts(m, o);
+    $('[data-x]', m).onclick = closeModal;
+    $('#sprod', m).onclick = (e) => openMenu(e.currentTarget, [{ label: 'البراند بشكل عام', selected: !o.productId, onClick: () => { o.productId = ''; $('#sprod .lab', m).textContent = 'البراند بشكل عام'; } }, ...b.products.map((p) => ({ label: p.name, desc: [p.kind === 'service' ? 'خدمة' : 'منتج', p.price].filter(Boolean).join(' · '), selected: o.productId === p.id, onClick: () => { o.productId = p.id; $('#sprod .lab', m).textContent = p.name; } }))]);
+    $('#sgo', m).onclick = () => busy($('#sgo', m), async () => {
+      try { const r = await api(`/api/brands/${b.id}/voice/script`, { method: 'POST', body: { ...o, seconds: Number(o.seconds), tone: $('#stone', m).value, cta: $('#scta', m).value, notes: $('#snotes', m).value, ai: aiOf('text') } }); closeModal(); onDone(r); toast('السكريبت جاهز · راجعه ثم اضغط «اقترح لي الأنسب» لاختيار الصوت'); } catch (err) { toast(err.message, true); }
+    });
+  });
+}
+
+// Carousel: edit every slide in one place (text, visual idea, order, add / remove).
+function cardsModal(it, onSave) {
+  let cards = (it.cards || []).map((c) => ({ ...c }));
+  const draw = (m) => {
+    $('#cmlist', m).innerHTML = cards.map((c, i) => `<div class="inset cm" data-i="${i}"><div class="flex"><b class="sm grow">الشريحة ${i + 1}${i === 0 ? ' · الغلاف' : i === cards.length - 1 ? ' · الدعوة للإجراء' : ''}</b>
+      <button class="btn grey icon sm" data-up aria-label="أعلى" ${i ? '' : 'disabled'}>↑</button><button class="btn grey icon sm" data-down aria-label="أسفل" ${i < cards.length - 1 ? '' : 'disabled'}>↓</button><button class="btn grey icon sm" data-rm aria-label="حذف" ${cards.length > 2 ? '' : 'disabled'}>${ic('trash')}</button></div>
+      <input class="field mt8" data-f="headline" value="${esc(c.headline)}" placeholder="العنوان على الشريحة">
+      <textarea class="field mt8" data-f="body" rows="2" placeholder="نص داعم (اختياري)">${esc(c.body || '')}</textarea>
+      <textarea class="field mt8" data-f="visual" rows="2" data-enhance="image" placeholder="ماذا تُظهر صورة هذه الشريحة؟">${esc(c.visual || '')}</textarea></div>`).join('');
+    enhancePrompts(m);
+    $$('[data-i]', m).forEach((row) => {
+      const i = Number(row.dataset.i);
+      $$('[data-f]', row).forEach((f) => (f.oninput = () => (cards[i][f.dataset.f] = f.value)));
+      $('[data-up]', row).onclick = () => { [cards[i - 1], cards[i]] = [cards[i], cards[i - 1]]; draw(m); };
+      $('[data-down]', row).onclick = () => { [cards[i + 1], cards[i]] = [cards[i], cards[i + 1]]; draw(m); };
+      $('[data-rm]', row).onclick = () => { cards.splice(i, 1); draw(m); };
+    });
+  };
+  modal(`<h2>شرائح الكاروسيل</h2><p class="muted sm mt8">كل الشرائح في مكان واحد: عدّل النص، فكرة الصورة، والترتيب. بعد الحفظ اضغط «صمّم الشرائح».</p>
+    <div id="cmlist" class="stack mt12" style="gap:10px"></div>
+    <button class="btn ghost sm mt12" id="cmadd">${ic('plus')}أضف شريحة</button>
+    <div class="foot"><button class="btn ghost" data-x>إلغاء</button><button class="btn primary" id="cms" data-busy="يحفظ…">${ic('check')}حفظ الشرائح</button></div>`, (m) => {
+    m.style.maxWidth = '720px';
+    draw(m);
+    $('[data-x]', m).onclick = closeModal;
+    $('#cmadd', m).onclick = () => { if (cards.length >= 10) return toast('حتى 10 شرائح', true); cards.splice(cards.length - 1, 0, { headline: '', body: '', visual: '' }); draw(m); };
+    $('#cms', m).onclick = () => busy($('#cms', m), async () => { try { await onSave(cards); closeModal(); toast('حُفظت الشرائح'); } catch (err) { toast(err.message, true); } });
   });
 }
 function monthOptions() {
@@ -1614,53 +1706,56 @@ PAGES.studio = async () => {
 function drawStudio() {
   const g = S.img;
   const b = S.brand;
-  const st = aiOf('image');
+  g.kind = g.kind || 'post'; g.slides = g.slides || 5; g.aspect = g.aspect || '4:5';
+  const prods = b.products.filter((p) => p.kind !== 'service');
   const v = view(`${studioTabs()}<div class="grid c12">
-    <div class="card s5"><div class="card-h"><h3>صورة جديدة</h3></div>
-      <span class="lbl" style="margin-top:0">${KIND_L.image}</span>${pickerHTML('image')}
-      <span class="lbl">المنتج في الصورة</span><div class="sel"><button class="sel-btn" id="iprod" data-menu><span class="lab">${(() => { const p = b.products.find((x) => x.id === g.productId); return p ? `${p.photo ? `<img src="${esc(p.photo)}" alt="" style="width:22px;height:22px;border-radius:6px;object-fit:cover;vertical-align:middle;margin-inline-end:6px">` : ''}${esc(p.name)}` : 'بدون منتج محدد'; })()}</span>${ic('chev')}</button></div>
-      ${(() => { const p = b.products.find((x) => x.id === g.productId); return p && !p.photo ? `<label class="drop mt8" style="display:block;padding:12px">${ic('upload')}<div class="sm mt8"><b>هذا المنتج بلا صورة: ارفعها هنا</b></div><div class="xs">تُحفظ في عقل البراند وتُستعمل كمرجع لنفس المنتج</div><input type="file" id="iprodf" accept="image/png,image/jpeg,image/webp" hidden></label>` : p ? '<p class="hint mt8">صورة المنتج تُرسل كمرجع: سيظهر نفس المنتج بالضبط.</p>' : ''; })()}
-      <div class="mt12"></div>
-      <textarea class="field" id="ip" data-mic rows="5" maxlength="2000" placeholder="صف الصورة: المنتج، المكان، الأشخاص، الإضاءة، الإحساس… مثلاً: زجاجة زيت أرغان على طاولة خشبية في رياض مغربي، ضوء صباحي دافئ">${esc(g.prompt)}</textarea>
-      <span class="lbl">المقاس</span>${pills('aspect', [['1:1', '1:1'], ['4:5', '4:5'], ['9:16', '9:16'], ['16:9', '16:9']], g.aspect)}
-      <span class="lbl">الأسلوب</span><div class="opts" data-opts="style">${Object.entries(STYLE_L).map(([k, l]) => `<button class="opt ${g.style === k ? 'on' : ''}" data-k="${k}">${l}</button>`).join('')}</div>
-      <span class="lbl">نص داخل الصورة (اختياري)</span><input class="field" id="itx" maxlength="120" value="${esc(g.text)}" placeholder="مثلاً: تخفيض 20%">
-      <div class="stack mt12" style="gap:8px">
-        <label class="flex sm" style="cursor:pointer"><input type="checkbox" class="check" id="icol" ${g.useColors ? 'checked' : ''}>ألوان البراند ${(b.visual?.colors || []).map((c) => `<span class="dot" style="background:${c}"></span>`).join('')}</label>
-        <label class="flex sm" style="cursor:pointer"><input type="checkbox" class="check" id="ilogo" ${g.useLogo ? 'checked' : ''} ${b.logo ? '' : 'disabled'}>ضع الشعار ${b.logo ? '' : '<span class="muted xs">(ارفع الشعار من عقل البراند)</span>'}</label>
-      </div>
-      ${st.provider === 'openai' ? `<span class="lbl">الجودة</span><div class="opts" data-opts="quality">${[['low', 'سريعة'], ['medium', 'متوسطة'], ['high', 'عالية']].map(([k, l]) => `<button class="opt ${g.quality === k ? 'on' : ''}" data-k="${k}">${l}</button>`).join('')}</div>` : ''}
-      <div class="flex mt16" style="justify-content:flex-end"><button class="btn primary" id="igo" data-busy="يصمم…">${ic('sparkle')}توليد الصورة</button></div>
+    <div class="card s5"><div class="card-h"><h3>تصميم جديد</h3><div class="end"><span class="muted xs">خلفية بالذكاء الاصطناعي + نصوصك وشعارك بخط البراند</span></div></div>
+      <span class="lbl" style="margin-top:0">نوع التصميم</span><div class="opts" data-opts="kind">${[['post', 'منشور'], ['carousel', 'كاروسيل'], ['story', 'ستوري'], ['ad', 'إعلان']].map(([k, l]) => `<button class="opt ${g.kind === k ? 'on' : ''}" data-k="${k}">${l}</button>`).join('')}</div>
+      ${g.kind === 'carousel' ? `<span class="lbl">عدد الشرائح</span><div class="opts" data-opts="slides">${[3, 4, 5, 6, 7, 8, 10].map((n) => `<button class="opt ${g.slides === n ? 'on' : ''}" data-k="${n}">${n}</button>`).join('')}</div>` : ''}
+      ${g.kind !== 'story' ? `<span class="lbl">المقاس</span>${pills('aspect', [['1:1', 'مربع 1:1'], ['4:5', 'عمودي 4:5'], ['16:9', 'عرضي 16:9']], g.aspect)}` : ''}
+      ${prods.length ? `<span class="lbl">المنتج في التصميم</span><div class="sel"><button class="sel-btn" id="iprod" data-menu><span class="lab">${(() => { const p = prods.find((x) => x.id === g.productId); return p ? `${p.photo ? `<img src="${esc(p.photo)}" alt="" style="width:22px;height:22px;border-radius:6px;object-fit:cover;vertical-align:middle;margin-inline-end:6px">` : ''}${esc(p.name)}` : 'بدون منتج محدد'; })()}</span>${ic('chev')}</button></div>` : ''}
+      <span class="lbl">الفكرة</span>
+      <textarea class="field" id="ip" data-mic data-enhance="content" rows="4" maxlength="2000" placeholder="مثلاً: عرض الجمعة البيضاء على قناع الكولاجين، نركّز على النتيجة الصباحية">${esc(g.prompt)}</textarea>
+      <p class="hint mt8">الذكاء الاصطناعي يكتب العنوان والنص والدعوة للإجراء ويصمم الخلفية، ثم تعدّل كل شيء في المصمم قبل الحفظ.</p>
+      <div class="flex mt16" style="justify-content:flex-end"><button class="btn ghost" id="iblank">${ic('edit')}مصمم فارغ</button><button class="btn primary" id="igo" data-busy="يحضّر التصميم…">${ic('sparkle')}صمّم</button></div>
     </div>
     <div class="card s7"><div class="card-h"><h3>معرض ${esc(b.name)}</h3><div class="end"><span class="muted xs">${S.images.length}</span></div></div>
-      ${S.images.length ? `<div class="gallery">${S.images.map((x) => `<figure data-im="${x.id}"><img src="${esc(x.url)}" alt="" loading="lazy" style="aspect-ratio:${x.aspect.replace(':', '/')}">
-        <figcaption>${x.version ? `<span class="chip vi" title="${esc(x.edit || '')}">v${x.version}</span>` : ''}<span class="xs grow" title="${esc(x.edit ? 'تعديل: ' + x.edit : x.prompt)}">${esc(x.edit ? 'تعديل: ' + x.edit : x.prompt)}</span>
+      ${S.images.length ? `<div class="gallery">${S.images.map((x) => `<figure data-im="${x.id}"><img src="${esc(x.url)}" alt="" loading="lazy" style="aspect-ratio:${String(x.aspect || '1:1').replace(':', '/')}">
+        <figcaption>${x.kind === 'design' ? chip(x.design?.total > 1 ? `تصميم ${x.design.index + 1}/${x.design.total}` : 'تصميم', 'vi', false) : x.version ? `<span class="chip vi" title="${esc(x.edit || '')}">v${x.version}</span>` : chip('خلفية', '', false)}<span class="xs grow" title="${esc(x.design?.slide?.headline || x.prompt)}">${esc(x.design?.slide?.headline || (x.edit ? 'تعديل: ' + x.edit : x.prompt))}</span>
         <a class="btn grey icon sm" href="${esc(x.url)}" download target="_blank" rel="noopener" aria-label="تحميل">${ic('download')}</a>
-        <button class="btn grey icon sm" data-re="${x.id}" aria-label="إعادة استعمال الوصف">${ic('refresh')}</button>
-        <button class="btn grey icon sm" data-iedit="${x.id}" aria-label="تعديل الصورة" title="تعديل الصورة">${ic('edit')}</button>
+        <button class="btn grey icon sm" data-des="${x.id}" aria-label="${x.kind === 'design' ? 'عدّل التصميم' : 'استعمل في تصميم'}" title="${x.kind === 'design' ? 'عدّل التصميم' : 'استعمل في تصميم'}">${ic('studio')}</button>
+        ${x.kind !== 'design' ? `<button class="btn grey icon sm" data-iedit="${x.id}" aria-label="تعديل الصورة" title="تعديل الصورة بالذكاء الاصطناعي">${ic('edit')}</button>` : ''}
         <button class="btn grey icon sm" data-sch="${x.id}" aria-label="جدولة" title="جدولة">${ic('calendar')}</button>
         <button class="btn grey icon sm" data-anim="${x.id}" aria-label="حوّلها إلى فيديو" title="حوّلها إلى فيديو">${ic('play')}</button>
         <button class="btn grey icon sm" data-del="${x.id}" aria-label="حذف">${ic('trash')}</button></figcaption></figure>`).join('')}</div>`
-      : `<div class="empty" style="padding:28px"><span class="ic">${ic('studio')}</span><h3>لا توجد صور بعد</h3><p>اكتب وصفاً واضغط توليد. يمكنك أيضاً تصميم صورة لأي منشور من صفحة النتائج.</p></div>`}
+      : `<div class="empty" style="padding:28px"><span class="ic">${ic('studio')}</span><h3>لا توجد تصاميم بعد</h3><p>اكتب فكرة واضغط «صمّم». يمكنك أيضاً تصميم أي منشور من صفحة النتائج.</p></div>`}
     </div></div>`);
   bindOpts(v, g);
-  bindPicker(v, () => drawStudio());
+  $$('[data-opts="kind"] .opt', v).forEach((x) => x.addEventListener('click', () => drawStudio()));
+  $$('[data-opts="slides"] .opt', v).forEach((x) => x.addEventListener('click', () => (g.slides = Number(x.dataset.k))));
   $('#ip', v).oninput = (e) => (g.prompt = e.target.value);
-  $('#itx', v).oninput = (e) => (g.text = e.target.value);
-  $('#icol', v).onchange = (e) => (g.useColors = e.target.checked);
-  $('#ilogo', v).onchange = (e) => (g.useLogo = e.target.checked);
-  $('#iprodf', v) && ($('#iprodf', v).onchange = async (e) => { try { const dataUrl = await readImage(e.target.files[0]); S.brand = await api(`/api/brands/${b.id}/products/${g.productId}/photo`, { method: 'POST', body: { dataUrl } }); toast('حُفظت صورة المنتج'); drawStudio(); } catch (err) { toast(err.message, true); } });
-  $('#iprod', v).onclick = () => openMenu($('#iprod', v), [{ label: 'بدون منتج محدد', selected: !g.productId, onClick: () => { g.productId = ''; drawStudio(); } }, ...b.products.map((p) => ({ label: p.name, desc: p.photo ? (p.price || 'صورة المنتج جاهزة') : 'ينقصه صورة', selected: g.productId === p.id, onClick: () => { g.productId = p.id; drawStudio(); } }))]);
+  $('#iprod', v) && ($('#iprod', v).onclick = () => openMenu($('#iprod', v), [{ label: 'بدون منتج محدد', selected: !g.productId, onClick: () => { g.productId = ''; drawStudio(); } }, ...prods.map((p) => ({ label: p.name, desc: p.photo ? (p.price || 'صورة المنتج جاهزة') : 'ينقصه صورة', selected: g.productId === p.id, onClick: () => { g.productId = p.id; drawStudio(); } }))]));
+  const aspect = () => (g.kind === 'story' ? '9:16' : g.aspect);
+  const n = () => (g.kind === 'carousel' ? g.slides : 1);
+  const onSave = (items) => { S.images = [...items, ...(S.images || [])]; S.ov = null; drawStudio(); };
+  $('#iblank', v).onclick = () => designer({ aspect: aspect(), productId: g.productId, slides: Array.from({ length: n() }, () => ({ prompt: g.prompt })), onSave, idea: g.prompt });
   $('#igo', v).onclick = (e) => busy(e.currentTarget, async () => {
-    if (!g.prompt.trim()) return toast('اكتب وصف الصورة', true);
-    const sp = b.products.find((x) => x.id === g.productId);
+    if (!g.prompt.trim()) return toast('اكتب الفكرة أولاً', true);
+    const sp = prods.find((x) => x.id === g.productId);
     if (sp && !sp.photo) return productPhotoModal(sp, () => drawStudio());
-    try { const img = await api(`/api/brands/${b.id}/images`, { method: 'POST', body: { ...g, ai: aiOf('image') } }); S.images = [img, ...S.images]; S.ov = null; drawStudio(); toast(`تم · ${img.model} · ${(img.ms / 1000).toFixed(1)} ث`); fallbackNote(img); } catch (err) { toast(err.message, true); }
+    try {
+      const r = await api(`/api/brands/${b.id}/design/copy`, { method: 'POST', body: { idea: `${g.kind === 'ad' ? 'Paid ad. ' : ''}${g.prompt}`, productId: g.productId, slides: n(), ai: aiOf('text') } });
+      designer({ aspect: aspect(), productId: g.productId, slides: r.slides, onSave, idea: g.prompt, auto: true, template: g.kind === 'story' ? 'bottom' : g.kind === 'ad' ? 'split' : 'bottom' });
+    } catch (err) { toast(err.message, true); }
   });
+  $$('[data-des]', v).forEach((x) => (x.onclick = () => {
+    const im = S.images.find((y) => y.id === x.dataset.des);
+    if (im.kind === 'design' && im.design) { const dd = im.design; designer({ aspect: dd.aspect, template: dd.template, productId: dd.productId, slides: [dd.slide], onSave }); }
+    else designer({ aspect: ['1:1', '4:5', '9:16', '16:9'].includes(im.aspect) ? im.aspect : '4:5', productId: im.productId, slides: [{ prompt: im.prompt, bg: im.url }], onSave });
+  }));
   $$('[data-iedit]', v).forEach((x) => (x.onclick = () => editModal('image', S.images.find((y) => y.id === x.dataset.iedit))));
-  $$('[data-sch]', v).forEach((x) => (x.onclick = () => { const im = S.images.find((y) => y.id === x.dataset.sch); scheduleModal({ title: im.prompt.slice(0, 80), media: { type: 'image', url: im.url, aspect: im.aspect }, source: { kind: 'image', id: im.id } }); }));
-  $$('[data-anim]', v).forEach((x) => (x.onclick = () => { const im = S.images.find((y) => y.id === x.dataset.anim); Object.assign(S.vid, { imageUrl: im.url, aspect: im.aspect === '9:16' || im.aspect === '4:5' ? '9:16' : '16:9', prompt: S.vid.prompt || im.prompt }); S.stab = 'video'; PAGES.studio(); }));
-  $$('[data-re]', v).forEach((x) => (x.onclick = () => { const im = S.images.find((y) => y.id === x.dataset.re); Object.assign(g, { prompt: im.prompt, aspect: im.aspect, style: im.style || 'none' }); drawStudio(); }));
+  $$('[data-sch]', v).forEach((x) => (x.onclick = () => { const im = S.images.find((y) => y.id === x.dataset.sch); scheduleModal({ title: (im.design?.slide?.headline || im.prompt || '').slice(0, 80), media: { type: 'image', url: im.url, aspect: im.aspect }, source: { kind: 'image', id: im.id } }); }));
+  $$('[data-anim]', v).forEach((x) => (x.onclick = () => { const im = S.images.find((y) => y.id === x.dataset.anim); Object.assign(S.vid, { imageUrl: '', pendingImage: im.url, aspect: im.aspect === '9:16' || im.aspect === '4:5' ? '9:16' : '16:9', prompt: S.vid.prompt || im.prompt || '' }); S.stab = 'video'; PAGES.studio(); }));
   $$('[data-del]', v).forEach((x) => (x.onclick = async () => {
     if (!(await confirmBox('حذف الصورة؟', 'ستُحذف من المعرض والتخزين.', 'حذف', true))) return;
     try { await api(`/api/brands/${b.id}/images/${x.dataset.del}`, { method: 'DELETE' }); S.images = S.images.filter((y) => y.id !== x.dataset.del); drawStudio(); } catch (err) { toast(err.message, true); }
@@ -1668,7 +1763,7 @@ function drawStudio() {
 }
 
 function studioTabs() {
-  return `<div class="stabs" role="tablist">${[['image', 'studio', 'صور', 'منشورات، إعلانات، صور منتجات'], ['video', 'play', 'فيديو', 'ريلز وإعلانات فيديو بالصوت']].map(([k, i, t, d]) => `<button class="stab ${S.stab === k ? 'on' : ''}" data-stab="${k}" role="tab" aria-selected="${S.stab === k}">${ic(i)}<span><b>${t}</b><small>${d}</small></span></button>`).join('')}</div>`;
+  return `<div class="stabs" role="tablist">${[['image', 'studio', 'تصميم', 'منشورات، كاروسيل، ستوري، إعلانات'], ['video', 'play', 'فيديو', 'ريلز وإعلانات فيديو بالصوت']].map(([k, i, t, d]) => `<button class="stab ${S.stab === k ? 'on' : ''}" data-stab="${k}" role="tab" aria-selected="${S.stab === k}">${ic(i)}<span><b>${t}</b><small>${d}</small></span></button>`).join('')}</div>`;
 }
 document.addEventListener('click', (e) => { const b = e.target.closest('[data-stab]'); if (!b) return; S.stab = b.dataset.stab; PAGES.studio(); });
 
@@ -1696,12 +1791,14 @@ async function drawVideo() {
       <span class="lbl" style="margin-top:0">${KIND_L.video}</span>${pickerHTML('video')}
       <span class="lbl">صورة البداية <span class="muted xs" style="font-weight:400">· اختياري: الفيديو يبدأ منها ويحرّكها</span></span>
       ${g.imageUrl ? '' : `<div class="grid c2" style="gap:10px"><label class="drop" style="display:block;padding:14px">${ic('upload')}<div class="sm mt8"><b>ارفع صورة</b></div><div class="xs">منتج، شخص، مشهد · PNG / JPG / WEBP</div><input type="file" id="vimgf" accept="image/png,image/jpeg,image/webp" hidden></label>
-        <button class="drop pick" id="vgal" style="display:block;padding:14px" type="button">${ic('studio')}<div class="sm mt8"><b>من المعرض أو المنتجات</b></div><div class="xs">صورة ولّدتها أو صورة منتج</div></button></div>`}
-      ${g.imageUrl ? `<div class="flex mt12 inset" style="padding:8px"><img src="${esc(g.imageUrl)}" alt="" style="width:56px;height:56px;object-fit:cover;border-radius:8px"><span class="sm grow">صورة البداية: سيتم تحريكها</span><button class="btn grey icon sm" id="vnoimg" aria-label="إزالة">${ic('x')}</button></div>` : ''}
+        <button class="drop pick" id="vgal" style="display:block;padding:14px" type="button">${ic('studio')}<div class="sm mt8"><b>من المعرض أو المنتجات</b></div><div class="xs">تصميم، صورة أو صورة منتج</div></button></div>
+        ${S.brand.logo?.url ? `<button class="btn ghost sm mt8" id="vlogo" type="button">${ic('sparkle')}ابدأ الفيديو بالشعار (ظهور الشعار متحرّكاً)</button>` : ''}`}
+      <label class="flex sm mt12" style="cursor:pointer"><input type="checkbox" class="check" id="vcol" ${g.useColors !== false ? 'checked' : ''}>ألوان البراند في المشهد ${(S.brand.visual?.colors || []).map((c) => `<span class="dot" style="background:${c}"></span>`).join('')}</label>
+      ${g.imageUrl ? `<div class="flex mt12 inset" style="padding:8px"><img src="${esc(g.imageUrl)}" alt="" style="width:56px;height:56px;object-fit:cover;border-radius:8px"><span class="sm grow">${g.logoStart ? 'البداية: الشعار يظهر متحرّكاً' : 'صورة البداية: سيتم تحريكها'}</span><button class="btn grey icon sm" id="vnoimg" aria-label="إزالة">${ic('x')}</button></div>` : ''}
       <label class="lbl">وصف المشهد</label>
-      <textarea class="field" id="vp" data-mic rows="4" maxlength="3000" placeholder="مثلاً: لقطة سينمائية لعائلة مغربية في صالون تقليدي، الأب يجرّب نظارات جديدة ويبتسم، الكاميرا تقترب ببطء، إضاءة دافئة">${esc(g.prompt)}</textarea>
+      <textarea class="field" id="vp" data-mic data-enhance="video" rows="4" maxlength="3000" placeholder="مثلاً: لقطة سينمائية لعائلة مغربية في صالون تقليدي، الأب يجرّب نظارات جديدة ويبتسم، الكاميرا تقترب ببطء، إضاءة دافئة">${esc(g.prompt)}</textarea>
       <label class="lbl">التعليق الصوتي / الحوار (اختياري)</label>
-      <textarea class="field" id="vvo" data-mic rows="2" maxlength="500" placeholder="الجملة التي تُقال في الفيديو، مثلاً: نظارتك الجديدة بنص الثمن، غير هاد الجمعة!">${esc(g.voiceover)}</textarea>
+      <textarea class="field" id="vvo" data-mic data-enhance="voice" rows="2" maxlength="500" placeholder="الجملة التي تُقال في الفيديو، مثلاً: نظارتك الجديدة بنص الثمن، غير هاد الجمعة!">${esc(g.voiceover)}</textarea>
       <div class="grid c2 mt8" style="gap:12px">
         <div><span class="lbl">المدة</span><div class="opts" data-opts="seconds">${secs.map((n) => `<button class="opt ${g.seconds === n ? 'on' : ''}" data-k="${n}">${n} ث</button>`).join('')}</div></div>
         <div><span class="lbl">المقاس</span><div class="opts" data-opts="aspect"><button class="opt ${g.aspect === '9:16' ? 'on' : ''}" data-k="9:16">9:16 ريلز</button><button class="opt ${g.aspect === '16:9' ? 'on' : ''}" data-k="16:9">16:9</button></div></div>
@@ -1733,14 +1830,19 @@ async function drawVideo() {
   $('#vp', v).oninput = (e) => (g.prompt = e.target.value);
   $('#vvo', v).oninput = (e) => (g.voiceover = e.target.value);
   $('#vaud', v).onchange = (e) => (g.audio = e.target.checked);
-  $('#vnoimg', v) && ($('#vnoimg', v).onclick = () => { g.imageUrl = ''; drawVideo(); });
-  $('#vimgf', v) && ($('#vimgf', v).onchange = async (e) => {
-    const z = e.target.closest('.drop'); z.classList.add('over');
-    try { const dataUrl = await readImage(e.target.files[0], 8); const r = await api(`/api/brands/${S.brand.id}/uploads`, { method: 'POST', body: { dataUrl } }); g.imageUrl = r.url; drawVideo(); } catch (err) { toast(err.message, true); z.classList.remove('over'); }
-  });
+  $('#vnoimg', v) && ($('#vnoimg', v).onclick = () => { g.imageUrl = ''; g.logoStart = false; g.useProduct = false; drawVideo(); });
+  // Any image format → JPEG (video models accept only PNG/JPEG)
+  const setStart = async (src, z, logo = false) => {
+    z && z.classList.add('over');
+    try { g.imageUrl = await uploadData(await toJpeg(src)); g.logoStart = logo; drawVideo(); } catch (err) { toast(err.message, true); z && z.classList.remove('over'); }
+  };
+  if (g.pendingImage) { const u = g.pendingImage; g.pendingImage = ''; setStart(u); }
+  $('#vimgf', v) && ($('#vimgf', v).onchange = (e) => setStart(e.target.files[0], e.target.closest('.drop')));
+  $('#vlogo', v) && ($('#vlogo', v).onclick = () => setStart(S.brand.logo.url, null, true));
+  $('#vcol', v) && ($('#vcol', v).onchange = (e) => (g.useColors = e.target.checked));
   $('#vgal', v) && ($('#vgal', v).onclick = async (e) => {
     if (!S.images) { try { S.images = (await api(`/api/brands/${S.brand.id}/images`)).images; } catch { S.images = []; } }
-    const items = [...S.brand.products.filter((p) => p.photo).map((p) => ({ label: `منتج: ${p.name}`, onClick: () => { g.imageUrl = p.photo; drawVideo(); } })), ...S.images.slice(0, 20).map((im) => ({ label: (im.prompt || 'صورة').slice(0, 50), desc: im.aspect, onClick: () => { g.imageUrl = im.url; g.aspect = im.aspect === '16:9' ? '16:9' : '9:16'; drawVideo(); } }))];
+    const items = [...S.brand.products.filter((p) => p.photo).map((p) => ({ label: `منتج: ${p.name}`, onClick: () => { g.useProduct = true; setStart(p.photo); } })), ...S.images.slice(0, 20).map((im) => ({ label: (im.design?.slide?.headline || im.prompt || 'صورة').slice(0, 50), desc: im.aspect, onClick: () => { g.aspect = im.aspect === '16:9' ? '16:9' : '9:16'; setStart(im.url); } }))];
     if (!items.length) return toast('لا توجد صور بعد في المعرض أو المنتجات', true);
     openMenu(e.currentTarget, items);
   });
@@ -1811,7 +1913,33 @@ function recStop() {
 async function transcribe(dataUrl) {
   return api('/api/transcribe', { method: 'POST', body: { brandId: S.activeId || null, dataUrl } });
 }
+// ✨ «حسّن» on every prompt field marked data-enhance="image|video|content|voice|research"
+function enhancePrompts(root) {
+  $$('[data-enhance]', root).forEach((t) => {
+    if (t.dataset.enh) return;
+    t.dataset.enh = '1';
+    const host = t.parentElement.classList.contains('micwrap') ? t.parentElement : t;
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'enh';
+    b.title = 'حسّن الوصف بالذكاء الاصطناعي';
+    b.innerHTML = `${ic('sparkle')}<span>حسّن</span>`;
+    if (host === t) { const w = document.createElement('div'); w.className = 'micwrap'; t.replaceWith(w); w.append(t, b); } else host.append(b);
+    b.onclick = async () => {
+      if (b.dataset.prev !== undefined) { t.value = b.dataset.prev; delete b.dataset.prev; b.innerHTML = `${ic('sparkle')}<span>حسّن</span>`; t.dispatchEvent(new Event('input', { bubbles: true })); return; }
+      if (!t.value.trim()) return toast('اكتب فكرة قصيرة أولاً، ثم اضغط «حسّن»', true);
+      b.disabled = true; b.innerHTML = '<span class="spin"></span>';
+      try {
+        const r = await api(`/api/brands/${S.brand.id}/enhance`, { method: 'POST', body: { text: t.value, kind: t.dataset.enhance } });
+        b.dataset.prev = t.value; t.value = r.text; t.dispatchEvent(new Event('input', { bubbles: true }));
+        b.innerHTML = `${ic('refresh')}<span>تراجع</span>`; toast('تم تحسين الوصف · تقدر تعدّله أو تتراجع');
+      } catch (e) { toast(e.message, true); b.innerHTML = `${ic('sparkle')}<span>حسّن</span>`; }
+      b.disabled = false;
+    };
+  });
+}
 function enhanceMics(root) {
+  setTimeout(() => enhancePrompts(root), 0);
   $$('textarea[data-mic]', root).forEach((t) => {
     if (t.parentElement.classList.contains('micwrap')) return;
     const w = document.createElement('div');
@@ -2185,10 +2313,17 @@ PAGES.research = async () => {
   if (S.rtab === 'compare') body = `
   <div class="card mb16"><div class="card-h"><span class="ic">${ic('insights')}</span><h3>${esc(b.name)} مقابل المنافسين</h3><div class="end">${CP ? `<span class="muted xs">${esc(CP.via)} · ${rel(CP.at)}</span><button class="btn grey sm" id="cpdl">${ic('download')}تنزيل</button>` : ''}</div></div>
     ${done.length ? `<span class="lbl" style="margin-top:0">اختر المنافسين للمقارنة (حتى 5)</span><div class="opts" id="cpsel">${done.map((c) => `<button class="opt ${S.rsel.has(c.id) ? 'on' : ''}" data-cs="${c.id}">${esc(c.name)}</button>`).join('')}</div>
+      <span class="lbl">ماذا نقارن؟</span><div class="opts" id="cpscope">${[['brand', 'البراند والتموضع'], ['products', 'المنتجات والأسعار'], ['both', 'الاثنين معاً']].map(([k, l]) => `<button class="opt ${(S.cpScope || CP?.scope || 'brand') === k ? 'on' : ''}" data-sc="${k}">${l}</button>`).join('')}</div>
       <div class="flex mt12" style="justify-content:flex-end"><button class="btn primary" id="cpgo" data-busy="يقارن… حتى دقيقة">${ic('sparkle')}${CP ? 'أعد المقارنة' : 'قارن الآن'}</button></div>`
     : `<p class="muted sm">حلّل منافساً واحداً على الأقل من تبويب «المنافسون»، ثم ارجع هنا لترى براندك أمامهم بعداً بعداً.</p><div class="flex mt12"><button class="btn primary sm" data-rt="competitors">${ic('research')}المنافسون</button></div>`}
   </div>
-  ${CP ? `<div class="card mb16"><p class="sm">${esc(CP.summary)}</p>
+  ${CP?.productCompare ? (() => { const PC = CP.productCompare; const POS = { cheaper: ['أرخص', 'em'], similar: ['مشابه', ''], pricier: ['أغلى', 'am'], unknown: ['غير معروف', ''] }; return `<div class="card mb16"><div class="card-h"><span class="ic">${ic('studio')}</span><h3>المنتجات والأسعار</h3><div class="end"><span class="muted xs">${PC.web ? 'أسعار من الإنترنت' : 'بدون بحث على الإنترنت'} · ${esc(PC.via || '')}</span></div></div>
+    <p class="sm">${esc(PC.summary)}</p>
+    <div class="tablewrap mt12"><table class="cmp"><thead><tr><th>منتجنا</th>${CP.names.map((n) => `<th>${esc(n)}</th>`).join('')}<th>موقعنا</th><th>الحكم</th><th>ما نفعله</th></tr></thead><tbody>
+      ${PC.products.map((r) => `<tr><td style="background:var(--accent-soft)"><b>${esc(r.ours)}</b>${r.ourPrice ? `<div class="tnum xs">${esc(r.ourPrice)}</div>` : ''}</td>${r.rivals.map((x) => `<td class="sm">${x.product ? esc(x.product) : '<span class="muted">—</span>'}${x.price ? `<div class="tnum xs"><b>${esc(x.price)}</b></div>` : ''}${x.source && /^https?:/.test(x.source) ? `<a class="src xs" href="${esc(x.source)}" target="_blank" rel="noopener">المصدر</a>` : ''}</td>`).join('')}<td>${chip(POS[r.position][0], POS[r.position][1], false)}</td><td class="sm sec">${esc(r.verdict)}</td><td class="sm">${esc(r.action)}</td></tr>`).join('')}
+    </tbody></table></div>
+    ${PC.gaps.length ? `<span class="lbl">منتجات يبيعها المنافسون ولا نبيعها</span><ul class="sm sec" style="padding-inline-start:18px">${PC.gaps.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}</div>`; })() : ''}
+  ${CP && CP.rows?.length ? `<div class="card mb16"><p class="sm">${esc(CP.summary)}</p>
     <div class="tablewrap mt12"><table class="cmp"><thead><tr><th>البعد</th><th style="background:var(--accent-soft)">${esc(b.name)}</th>${CP.names.map((n) => `<th>${esc(n)}</th>`).join('')}<th>المتفوّق</th><th>ما نفعله</th></tr></thead><tbody>
       ${CP.rows.map((r) => `<tr><td><b>${esc(r.dimension)}</b></td><td style="background:var(--accent-soft)">${esc(r.brand)}</td>${r.competitors.map((x) => `<td class="sec">${esc(x)}</td>`).join('')}<td>${chip(r.leader, r.leader.trim().toLowerCase() === b.name.trim().toLowerCase() ? 'em' : 'am', false)}</td><td class="sm">${esc(r.action)}</td></tr>`).join('')}
     </tbody></table></div></div>
@@ -2236,9 +2371,10 @@ PAGES.research = async () => {
   $('#cpdl', v) && ($('#cpdl', v).onclick = (e) => downloadMenu(e.currentTarget, 'kind=compare'));
   $('#mkdl', v) && ($('#mkdl', v).onclick = (e) => downloadMenu(e.currentTarget, 'kind=market'));
   $$('[data-cs]', v).forEach((x) => (x.onclick = () => { const id = x.dataset.cs; if (S.rsel.has(id)) S.rsel.delete(id); else if (S.rsel.size < 5) S.rsel.add(id); else return toast('حتى 5 منافسين', true); x.classList.toggle('on', S.rsel.has(id)); }));
+  $$('[data-sc]', v).forEach((x) => (x.onclick = () => { S.cpScope = x.dataset.sc; $$('[data-sc]', v).forEach((y) => y.classList.toggle('on', y === x)); }));
   $('#cpgo', v) && ($('#cpgo', v).onclick = (e) => busy(e.currentTarget, async () => {
     if (!S.rsel.size) return toast('اختر منافساً واحداً على الأقل', true);
-    try { await api(`/api/brands/${b.id}/research/compare`, { method: 'POST', body: { ids: [...S.rsel] } }); toast('المقارنة جاهزة'); reload(); } catch (err) { toast(err.message, true); }
+    try { await api(`/api/brands/${b.id}/research/compare`, { method: 'POST', body: { ids: [...S.rsel], scope: S.cpScope || CP?.scope || 'brand' } }); toast('المقارنة جاهزة'); reload(); } catch (err) { toast(err.message, true); }
   }));
   $('#rdisc', v) && ($('#rdisc', v).onclick = (e) => busy(e.currentTarget, async () => { try { const r = await api(`/api/brands/${b.id}/research/discover`, { method: 'POST', body: { market: $('#rmk').value, seeds: $('#rseed').value } }); toast(`وجدت ${r.found.length} منافس جديد · ${r.web ? 'من الإنترنت' : 'بدون بحث على الإنترنت'}`); reload(); } catch (err) { toast(err.message, true); } }));
   $('#radd', v) && ($('#radd', v).onclick = () => modal(`<h2>إضافة منافس</h2><label class="lbl">الاسم</label><input class="field" id="cn2">
@@ -2329,6 +2465,246 @@ PAGES.insights = async () => {
   $('#iacc', v) && ($('#iacc', v).onclick = async () => { await socialState(true); accountsModal(); });
   $('#ilearn').onclick = (e) => busy(e.currentTarget, async () => { try { await api(`/api/brands/${b.id}/insights/learn`, { method: 'POST', body: {} }); toast('تم التحليل'); PAGES.insights(); } catch (err) { toast(err.message, true); } });
 };
+
+// ================= DESIGNER (تصميم المخرج) =================
+// The AI makes a clean background (no text); the platform writes the real text, logo and CTA on top
+// with the brand fonts and colours (canvas), so Arabic is always correct and editable.
+const DSIZE = { '1:1': [1080, 1080], '4:5': [1080, 1350], '9:16': [1080, 1920], '16:9': [1920, 1080] };
+const DTPL = [['bottom', 'نص أسفل الصورة'], ['top', 'شريط علوي'], ['card', 'بطاقة في الوسط'], ['split', 'نصف صورة · نصف لون'], ['clean', 'صورة فقط + شعار']];
+const SPACE = { bottom: 'bottom', top: 'top', card: 'center', split: 'side', clean: '' };
+const sameOrigin = (u) => (!u ? '' : /^\/api\//.test(u) || u.startsWith('data:') ? u : `/api/brands/${S.brand.id}/proxy?u=${encodeURIComponent(u)}`);
+const IMGC = new Map();
+function loadImg(u) {
+  if (!u) return Promise.resolve(null);
+  const k = sameOrigin(u);
+  if (!IMGC.has(k)) IMGC.set(k, new Promise((ok) => { const im = new Image(); im.onload = () => ok(im); im.onerror = () => ok(null); im.src = k; }));
+  return IMGC.get(k);
+}
+const lum = (hex) => { const h = String(hex || '#000').replace('#', ''); const [r, g, b] = [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16) / 255).map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4)); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+const onColor = (hex) => (lum(hex) > 0.45 ? '#000000' : '#FFFFFF');
+function wrapLines(ctx, text, maxW) {
+  const words = String(text || '').split(/\s+/).filter(Boolean);
+  const lines = []; let line = '';
+  for (const w of words) { const t = line ? `${line} ${w}` : w; if (ctx.measureText(t).width > maxW && line) { lines.push(line); line = w; } else line = t; }
+  if (line) lines.push(line);
+  return lines;
+}
+function fitText(ctx, text, font, weight, maxW, startSize, maxLines) {
+  let size = startSize;
+  for (; size > 18; size -= 2) { ctx.font = `${weight} ${size}px "${font}", "Thmanyah Sans", system-ui, sans-serif`; const l = wrapLines(ctx, text, maxW); if (l.length <= maxLines) return { size, lines: l }; }
+  ctx.font = `${weight} ${size}px "${font}", "Thmanyah Sans", system-ui, sans-serif`;
+  return { size, lines: wrapLines(ctx, text, maxW).slice(0, maxLines) };
+}
+function drawCover(ctx, im, x, y, w, h) {
+  if (!im) return;
+  const r = Math.max(w / im.width, h / im.height);
+  const iw = im.width * r; const ih = im.height * r;
+  ctx.save(); ctx.beginPath(); ctx.rect(x, y, w, h); ctx.clip();
+  ctx.drawImage(im, x + (w - iw) / 2, y + (h - ih) / 2, iw, ih); ctx.restore();
+}
+function rr(ctx, x, y, w, h, r) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
+async function renderSlide(canvas, d, sl, i, n) {
+  const [W, H] = DSIZE[d.aspect] || DSIZE['1:1'];
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+  const hf = d.fontHead || 'Thmanyah Sans'; const bf = d.fontBody || hf;
+  try { await Promise.all([document.fonts.load(`700 40px "${hf}"`), document.fonts.load(`400 40px "${bf}"`)]); } catch { /* fallback fonts */ }
+  const [bg, logo] = await Promise.all([loadImg(sl.bg), d.showLogo ? loadImg(S.brand.logo?.url) : null]);
+  const C = d.color || '#000000'; const CT = onColor(C);
+  const P = Math.round(Math.min(W, H) * 0.07);
+  ctx.direction = 'rtl'; ctx.textBaseline = 'alphabetic';
+  ctx.fillStyle = '#EDEDED'; ctx.fillRect(0, 0, W, H);
+  const scale = { s: 0.85, m: 1, l: 1.18 }[d.size || 'm'];
+  const head = (text, color, x, y, maxW, base, lines, align = 'right') => { ctx.textAlign = align; ctx.fillStyle = color; const f = fitText(ctx, text, hf, 700, maxW, Math.round(base * scale), lines); f.lines.forEach((l, k) => ctx.fillText(l, x, y + k * f.size * 1.18)); return y + (f.lines.length - 1) * f.size * 1.18 + f.size * 0.35; };
+  const para = (text, color, x, y, maxW, base, lines, align = 'right') => { if (!text) return y; ctx.textAlign = align; ctx.fillStyle = color; const f = fitText(ctx, text, bf, 400, maxW, Math.round(base * scale), lines); f.lines.forEach((l, k) => ctx.fillText(l, x, y + k * f.size * 1.4)); return y + (f.lines.length - 1) * f.size * 1.4 + f.size * 0.4; };
+  const pill = (text, x, y, align = 'right', inv = false) => {
+    if (!text) return;
+    ctx.font = `700 ${Math.round(W * 0.034 * scale)}px "${hf}", "Thmanyah Sans", sans-serif`;
+    const tw = ctx.measureText(text).width; const ph = W * 0.034 * scale * 2.1; const pw = tw + ph * 1.1;
+    const px = align === 'right' ? x - pw : align === 'center' ? x - pw / 2 : x;
+    ctx.fillStyle = inv ? CT : C; rr(ctx, px, y, pw, ph, ph / 2); ctx.fill();
+    ctx.fillStyle = inv ? C : CT; ctx.textAlign = 'center'; ctx.fillText(text, px + pw / 2, y + ph * 0.66);
+  };
+  const t = d.template;
+  if (t === 'split') {
+    const land = W > H;
+    const iw = land ? W * 0.5 : W; const ih = land ? H : H * 0.56;
+    drawCover(ctx, bg, 0, 0, iw, ih);
+    ctx.fillStyle = C; ctx.fillRect(land ? iw : 0, land ? 0 : ih, land ? W - iw : W, land ? H : H - ih);
+    const x0 = W - P; const top = land ? H * 0.28 : ih + P * 1.2; const mw = (land ? W - iw : W) - P * 2;
+    let y = head(sl.headline, CT, x0, top + W * 0.06, mw, W * (land ? 0.05 : 0.075), 3);
+    y = para(sl.sub, CT, x0, y + W * 0.045, mw, W * (land ? 0.026 : 0.036), 3);
+    pill(sl.cta, x0, y + W * 0.04, 'right', true);
+  } else {
+    drawCover(ctx, bg, 0, 0, W, H);
+    if (t === 'bottom') {
+      const g = ctx.createLinearGradient(0, H * 0.38, 0, H); g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,.78)');
+      ctx.fillStyle = g; ctx.fillRect(0, H * 0.38, W, H * 0.62);
+      ctx.font = `700 ${W * 0.075}px "${hf}"`;
+      const hl = fitText(ctx, sl.headline, hf, 700, W - P * 2, Math.round(W * 0.078 * scale), 3);
+      const subH = sl.sub ? W * 0.04 * 3 : 0; const ctaH = sl.cta ? W * 0.08 : 0;
+      let y = H - P - ctaH - subH - (hl.lines.length - 1) * hl.size * 1.18;
+      y = head(sl.headline, '#FFFFFF', W - P, y, W - P * 2, W * 0.078, 3);
+      y = para(sl.sub, 'rgba(255,255,255,.88)', W - P, y + W * 0.045, W - P * 2, W * 0.036, 2);
+      pill(sl.cta, W - P, y + W * 0.03);
+    } else if (t === 'top') {
+      const bandH = H * (W > H ? 0.42 : 0.34);
+      ctx.fillStyle = C; ctx.fillRect(0, 0, W, bandH);
+      let y = head(sl.headline, CT, W - P, P + W * 0.08 + (d.showLogo && d.logoPos !== 'bottom' ? W * 0.02 : 0), W - P * 2 - (d.showLogo ? W * 0.16 : 0), W * 0.07, 2);
+      para(sl.sub, CT, W - P, y + W * 0.045, W - P * 2, W * 0.034, 2);
+      pill(sl.cta, W - P, H - P - W * 0.075);
+    } else if (t === 'card') {
+      const cw = W * 0.82; const cx = (W - cw) / 2;
+      ctx.font = `700 ${W * 0.066}px "${hf}"`;
+      const hl = fitText(ctx, sl.headline, hf, 700, cw - P * 1.4, Math.round(W * 0.066 * scale), 3);
+      const ch = P * 1.4 + hl.lines.length * hl.size * 1.18 + (sl.sub ? W * 0.12 : 0) + (sl.cta ? W * 0.1 : 0);
+      const cy = (H - ch) / 2;
+      ctx.save(); ctx.shadowColor = 'rgba(0,0,0,.18)'; ctx.shadowBlur = 40; ctx.fillStyle = 'rgba(255,255,255,.94)'; rr(ctx, cx, cy, cw, ch, W * 0.035); ctx.fill(); ctx.restore();
+      let y = head(sl.headline, '#0A0A0A', W / 2, cy + P * 0.7 + hl.size, cw - P * 1.4, W * 0.066, 3, 'center');
+      y = para(sl.sub, '#404040', W / 2, y + W * 0.045, cw - P * 1.4, W * 0.032, 2, 'center');
+      pill(sl.cta, W / 2, y + W * 0.03, 'center');
+    }
+  }
+  if (logo) {
+    const lw = W * 0.15; const lh = (logo.height / logo.width) * lw;
+    const lx = d.logoPos === 'right' ? W - P - lw : P; const ly = d.logoPos === 'bottom' ? H - P - lh : P;
+    if (d.logoPlate) { ctx.fillStyle = 'rgba(255,255,255,.92)'; rr(ctx, lx - lw * 0.08, ly - lw * 0.08, lw * 1.16, lh + lw * 0.16, lw * 0.08); ctx.fill(); }
+    ctx.drawImage(logo, lx, ly, lw, lh);
+  }
+  if (n > 1) {
+    ctx.font = `700 ${W * 0.026}px "${hf}", sans-serif`; ctx.textAlign = 'left'; ctx.direction = 'ltr';
+    const txt = `${i + 1}/${n}`; const tw = ctx.measureText(txt).width + W * 0.03;
+    ctx.fillStyle = 'rgba(0,0,0,.45)'; rr(ctx, P, H - P - W * 0.05, tw, W * 0.05, W * 0.025); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.fillText(txt, P + W * 0.015, H - P - W * 0.015); ctx.direction = 'rtl';
+  }
+}
+const canvasData = (c, type = 'image/png', q = 0.92) => c.toDataURL(type, q);
+async function uploadData(dataUrl) { return (await api(`/api/brands/${S.brand.id}/uploads`, { method: 'POST', body: { dataUrl } })).url; }
+// Any image → JPEG (videos only accept PNG/JPEG; also fixes webp/heic/gif)
+async function toJpeg(src, max = 1920) {
+  const im = await (typeof src === 'string' ? loadImg(src) : new Promise((ok) => { const i = new Image(); i.onload = () => ok(i); i.onerror = () => ok(null); i.src = URL.createObjectURL(src); }));
+  if (!im) throw new Error('تعذّرت قراءة الصورة. جرّب صيغة أخرى (JPG أو PNG).');
+  const r = Math.min(1, max / Math.max(im.width, im.height));
+  const c = document.createElement('canvas'); c.width = Math.round(im.width * r); c.height = Math.round(im.height * r);
+  const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height); x.drawImage(im, 0, 0, c.width, c.height);
+  return c.toDataURL('image/jpeg', 0.9);
+}
+
+function brandFonts() { const f = S.brand.visual?.fonts || {}; return { head: f.heading || 'Thmanyah Sans', body: f.body || f.heading || 'Thmanyah Sans' }; }
+// opts: { aspect, slides:[{headline,sub,cta,prompt,bg}], productId, from, template, onSave(items), auto }
+function designer(opts = {}) {
+  const b = S.brand;
+  const fonts = brandFonts();
+  if (fonts.head !== 'Thmanyah Sans') loadGFonts([fonts.head, fonts.body]);
+  const d = {
+    aspect: opts.aspect || '4:5', template: opts.template || 'bottom', color: (b.visual?.colors || [])[0] || '#000000',
+    showLogo: Boolean(b.logo?.url) && opts.showLogo !== false, logoPos: 'left', logoPlate: false, size: 'm',
+    fontHead: fonts.head, fontBody: fonts.body, productId: opts.productId || '', useProduct: Boolean(opts.productId), useColors: true,
+    slides: (opts.slides && opts.slides.length ? opts.slides : [{ headline: '', sub: '', cta: '', prompt: '' }]).map((x) => ({ headline: x.headline || '', sub: x.sub || '', cta: x.cta || '', prompt: x.prompt || '', bg: x.bg || '' })),
+    cur: 0,
+  };
+  const prods = b.products.filter((p) => p.kind !== 'service');
+  modal(`<div class="flex"><h2 class="grow">تصميم ${d.slides.length > 1 ? `كاروسيل (${d.slides.length} شرائح)` : 'المنشور'}</h2><span class="muted xs">النص والشعار يُكتبان بخط براندك، والخلفية بالذكاء الاصطناعي</span></div>
+    <div class="dz mt12"><div class="dz-prev"><div class="dz-stage"><canvas id="dzc"></canvas><div class="dz-busy" id="dzb" hidden><span class="spin"></span><span id="dzbt">يصمم الخلفية…</span></div></div>
+      ${d.slides.length > 1 ? `<div class="dz-strip" id="dzs"></div>` : ''}</div>
+      <div class="dz-ctl">
+        <span class="lbl" style="margin-top:0">القالب</span><div class="opts" id="dzt">${DTPL.map(([k, l]) => `<button class="opt ${d.template === k ? 'on' : ''}" data-t="${k}">${l}</button>`).join('')}</div>
+        <span class="lbl">المقاس</span><div class="opts" id="dza">${[['1:1', 'مربع'], ['4:5', 'عمودي'], ['9:16', 'ستوري'], ['16:9', 'عرضي']].map(([k, l]) => `<button class="opt ${d.aspect === k ? 'on' : ''}" data-a="${k}">${l}</button>`).join('')}</div>
+        <div class="flex mt12"><span class="lbl grow" style="margin:0">النصوص <span class="muted xs" id="dzn"></span></span><button class="btn ghost sm" id="dzcopy" data-busy="يكتب…">${ic('sparkle')}اكتبها لي</button></div>
+        <input class="field mt8" id="dzh" placeholder="العنوان الكبير (حتى 7 كلمات)">
+        <textarea class="field mt8" id="dzsub" rows="2" placeholder="نص قصير داعم (اختياري)"></textarea>
+        <input class="field mt8" id="dzcta" placeholder="زر الدعوة للإجراء (اختياري): اطلب الآن">
+        <span class="lbl">الخلفية</span>
+        <textarea class="field" id="dzp" rows="3" data-enhance="image" placeholder="ماذا تُظهر الصورة؟ مثلاً: المنتج على طاولة رخامية بإضاءة صباحية"></textarea>
+        <div class="flex wrap mt8" style="gap:8px">
+          ${prods.length ? `<div class="sel" style="min-width:160px;flex:1"><button class="sel-btn" id="dzprod" data-menu><span class="lab">${esc(prods.find((p) => p.id === d.productId)?.name || 'بدون منتج')}</span>${ic('chev')}</button></div>` : ''}
+          <label class="flex xs" style="cursor:pointer"><input type="checkbox" class="check" id="dzcol" checked>ألوان البراند في الصورة</label>
+        </div>
+        <div class="flex wrap mt8" style="gap:8px"><button class="btn primary sm" id="dzgen" data-busy="يصمم…">${ic('sparkle')}صمّم الخلفية</button>${d.slides.length > 1 ? `<button class="btn grey sm" id="dzall" data-busy="…">${ic('sparkle')}كل الشرائح</button>` : ''}
+          <label class="btn grey sm" data-drop style="cursor:pointer">${ic('upload')}ارفع صورة<input type="file" id="dzup" accept="image/*" hidden></label><button class="btn ghost sm" id="dzgal">${ic('studio')}من المعرض</button></div>
+        <span class="lbl">العناصر</span>
+        <div class="flex wrap" style="gap:12px">${b.logo?.url ? `<label class="flex sm" style="cursor:pointer"><input type="checkbox" class="check" id="dzlogo" ${d.showLogo ? 'checked' : ''}>الشعار</label>
+          <div class="opts" id="dzlp">${[['left', 'يسار'], ['right', 'يمين'], ['bottom', 'أسفل']].map(([k, l]) => `<button class="opt ${d.logoPos === k ? 'on' : ''}" data-lp="${k}" style="height:30px">${l}</button>`).join('')}</div>
+          <label class="flex sm" style="cursor:pointer"><input type="checkbox" class="check" id="dzplate">خلفية بيضاء للشعار</label>` : `<span class="muted xs">لا يوجد شعار. ارفعه من عقل البراند ← الهوية البصرية.</span>`}</div>
+        <span class="lbl">اللون الأساسي</span><div class="flex wrap" id="dzcolors" style="gap:8px">${[...new Set([...(b.visual?.colors || []), '#000000', '#FFFFFF'])].slice(0, 8).map((c) => `<button class="swatch-btn ${c === d.color ? 'on' : ''}" data-c="${c}" style="background:${c}" aria-label="${c}"></button>`).join('')}</div>
+        <span class="lbl">حجم النص</span><div class="opts" id="dzsz">${[['s', 'صغير'], ['m', 'متوسط'], ['l', 'كبير']].map(([k, l]) => `<button class="opt ${d.size === k ? 'on' : ''}" data-sz="${k}">${l}</button>`).join('')}</div>
+        <p class="xs muted mt12">الخط: ${esc(d.fontHead)}${d.fontBody !== d.fontHead ? ` + ${esc(d.fontBody)}` : ''} · تغيّره من عقل البراند ← الخطوط.</p>
+      </div></div>
+    <div class="foot"><button class="btn ghost" data-x>إلغاء</button><button class="btn grey" id="dzdl">${ic('download')}تحميل PNG</button><button class="btn primary" id="dzsave" data-busy="يحفظ…">${ic('check')}حفظ التصميم</button></div>`, (m) => {
+    m.classList.add('wide');
+    const cv = $('#dzc', m);
+    const sl = () => d.slides[d.cur];
+    const sync = () => { $('#dzh', m).value = sl().headline; $('#dzsub', m).value = sl().sub; $('#dzcta', m).value = sl().cta; $('#dzp', m).value = sl().prompt; $('#dzn', m).textContent = d.slides.length > 1 ? `· الشريحة ${d.cur + 1}` : ''; };
+    let tick = 0;
+    const draw = async () => {
+      const my = ++tick;
+      const c = document.createElement('canvas');
+      await renderSlide(c, d, sl(), d.cur, d.slides.length);
+      if (my !== tick) return;
+      cv.width = c.width; cv.height = c.height; cv.getContext('2d').drawImage(c, 0, 0);
+      const st = $('#dzs', m);
+      if (st) st.innerHTML = d.slides.map((x, i) => `<button class="dz-th ${i === d.cur ? 'on' : ''}" data-i="${i}" title="${esc(x.headline)}">${x.bg ? `<img src="${esc(sameOrigin(x.bg))}" alt="">` : ''}<b>${i + 1}</b></button>`).join(''), $$('[data-i]', st).forEach((x) => (x.onclick = () => { d.cur = Number(x.dataset.i); sync(); draw(); }));
+    };
+    const busyOn = (t2) => { $('#dzb', m).hidden = !t2; if (t2) $('#dzbt', m).textContent = t2; };
+    $('[data-x]', m).onclick = closeModal;
+    $$('[data-t]', m).forEach((x) => (x.onclick = () => { d.template = x.dataset.t; $$('[data-t]', m).forEach((y) => y.classList.toggle('on', y === x)); draw(); }));
+    $$('[data-a]', m).forEach((x) => (x.onclick = () => { d.aspect = x.dataset.a; $$('[data-a]', m).forEach((y) => y.classList.toggle('on', y === x)); draw(); }));
+    $$('[data-lp]', m).forEach((x) => (x.onclick = () => { d.logoPos = x.dataset.lp; $$('[data-lp]', m).forEach((y) => y.classList.toggle('on', y === x)); draw(); }));
+    $$('[data-sz]', m).forEach((x) => (x.onclick = () => { d.size = x.dataset.sz; $$('[data-sz]', m).forEach((y) => y.classList.toggle('on', y === x)); draw(); }));
+    $$('[data-c]', m).forEach((x) => (x.onclick = () => { d.color = x.dataset.c; $$('[data-c]', m).forEach((y) => y.classList.toggle('on', y === x)); draw(); }));
+    $('#dzlogo', m) && ($('#dzlogo', m).onchange = (e) => { d.showLogo = e.target.checked; draw(); });
+    $('#dzplate', m) && ($('#dzplate', m).onchange = (e) => { d.logoPlate = e.target.checked; draw(); });
+    $('#dzcol', m).onchange = (e) => { d.useColors = e.target.checked; };
+    let to;
+    [['#dzh', 'headline'], ['#dzsub', 'sub'], ['#dzcta', 'cta'], ['#dzp', 'prompt']].forEach(([sel, k]) => ($(sel, m).oninput = (e) => { sl()[k] = e.target.value; if (k !== 'prompt') { clearTimeout(to); to = setTimeout(draw, 120); } }));
+    $('#dzprod', m) && ($('#dzprod', m).onclick = (e) => openMenu(e.currentTarget, [{ label: 'بدون منتج', selected: !d.productId, onClick: () => { d.productId = ''; $('#dzprod .lab', m).textContent = 'بدون منتج'; } }, ...prods.map((p) => ({ label: p.name, desc: p.photo ? 'صورة المنتج تُستعمل كمرجع' : 'ينقصه صورة', selected: d.productId === p.id, onClick: () => { d.productId = p.id; $('#dzprod .lab', m).textContent = p.name; } }))]));
+    const genBg = async (i) => {
+      const s2 = d.slides[i];
+      const prompt = (s2.prompt || s2.headline || '').trim();
+      if (!prompt) throw new Error('اكتب ماذا تُظهر الصورة');
+      const prod = b.products.find((p) => p.id === d.productId);
+      if (prod && prod.kind !== 'service' && !prod.photo) { closeModal(); return productPhotoModal(prod, () => designer({ ...opts, slides: d.slides, aspect: d.aspect, template: d.template, productId: d.productId })); }
+      const img = await api(`/api/brands/${b.id}/images`, { method: 'POST', body: { prompt, aspect: d.aspect, productId: d.productId || undefined, useColors: d.useColors, space: SPACE[d.template], style: 'none', from: opts.from, ai: aiOf('image') } });
+      s2.bg = img.url; S.images = null;
+    };
+    $('#dzgen', m).onclick = () => busy($('#dzgen', m), async () => { busyOn('يصمم الخلفية… حتى دقيقة'); try { await genBg(d.cur); await draw(); } catch (err) { toast(err.message, true); } busyOn(''); });
+    $('#dzall', m) && ($('#dzall', m).onclick = () => busy($('#dzall', m), async () => {
+      for (let i = 0; i < d.slides.length; i++) { if (d.slides[i].bg) continue; d.cur = i; sync(); busyOn(`يصمم الشريحة ${i + 1} من ${d.slides.length}…`); try { await genBg(i); } catch (err) { toast(`الشريحة ${i + 1}: ${err.message}`, true); } await draw(); }
+      busyOn('');
+    }));
+    $('#dzup', m).onchange = async (e) => { busyOn('يرفع…'); try { sl().bg = await uploadData(await toJpeg(e.target.files[0], 2400)); await draw(); } catch (err) { toast(err.message, true); } busyOn(''); };
+    $('#dzgal', m).onclick = async (e) => {
+      if (!S.images) { try { S.images = (await api(`/api/brands/${b.id}/images`)).images; } catch { S.images = []; } }
+      const items = [...b.products.filter((p) => p.photo).map((p) => ({ label: `منتج: ${p.name}`, onClick: () => { sl().bg = p.photo; draw(); } })), ...S.images.filter((x) => x.kind !== 'design').slice(0, 30).map((im) => ({ label: (im.prompt || 'صورة').slice(0, 50), desc: im.aspect, onClick: () => { sl().bg = im.url; draw(); } }))];
+      if (!items.length) return toast('المعرض فارغ', true);
+      openMenu(e.currentTarget, items);
+    };
+    $('#dzcopy', m).onclick = () => busy($('#dzcopy', m), async () => {
+      try {
+        const r = await api(`/api/brands/${b.id}/design/copy`, { method: 'POST', body: { idea: d.slides.map((x) => x.prompt || x.headline).filter(Boolean).join(' / ') || opts.idea || '', productId: d.productId, slides: d.slides.length, ai: aiOf('text') } });
+        r.slides.forEach((x, i) => { if (d.slides[i]) Object.assign(d.slides[i], { headline: x.headline, sub: x.sub, cta: i === d.slides.length - 1 || d.slides.length === 1 ? x.cta : d.slides[i].cta, prompt: d.slides[i].prompt || x.prompt }); });
+        sync(); draw();
+      } catch (err) { toast(err.message, true); }
+    });
+    $('#dzdl', m).onclick = async () => { const c = document.createElement('canvas'); await renderSlide(c, d, sl(), d.cur, d.slides.length); const a = document.createElement('a'); a.href = canvasData(c); a.download = `${b.name}-design-${d.cur + 1}.png`; a.click(); };
+    $('#dzsave', m).onclick = () => busy($('#dzsave', m), async () => {
+      try {
+        if (d.slides.some((x) => !x.bg) && !(await confirmBox('بعض الشرائح بدون خلفية', 'سيُحفظ التصميم بخلفية رمادية في هذه الشرائح. تكمل؟', 'حفظ'))) return;
+        const saved = [];
+        for (let i = 0; i < d.slides.length; i++) {
+          const c = document.createElement('canvas');
+          await renderSlide(c, d, d.slides[i], i, d.slides.length);
+          const url = await uploadData(canvasData(c, 'image/jpeg', 0.92));
+          saved.push(await api(`/api/brands/${b.id}/images/design`, { method: 'POST', body: { url, aspect: d.aspect, prompt: d.slides[i].prompt, productId: d.productId || null, from: opts.from || null, design: { ...d, cur: i, slides: undefined, slide: d.slides[i], index: i, total: d.slides.length } } }));
+        }
+        S.images = null; closeModal(); toast(saved.length > 1 ? `حُفظت ${saved.length} شرائح في المعرض` : 'حُفظ التصميم في المعرض');
+        opts.onSave && opts.onSave(saved, d);
+      } catch (err) { toast(err.message, true); }
+    });
+    sync(); draw();
+    if (opts.auto && !sl().bg && sl().prompt) $('#dzgen', m).click();
+  });
+}
 
 // ---------- approvals (4 gates) ----------
 const GATES = { 1: ['البوابة 1 · البراند', 'brain'], 2: ['البوابة 2 · المفهوم والمحتوى', 'create'], 3: ['البوابة 3 · التصميم', 'studio'], 4: ['البوابة 4 · النشر', 'calendar'] };
