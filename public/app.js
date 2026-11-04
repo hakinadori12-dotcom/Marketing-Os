@@ -273,8 +273,8 @@ addEventListener('resize', () => placePills());
 
 // ---------------- login ----------------
 function renderLogin() {
-  $('#root').innerHTML = `<div class="login"><div class="login-hero" aria-hidden="true"><span class="tag">Marketing OS</span><div class="mega">نسوّق<br>ما <span class="mark">يتحرّك</span></div><span class="cross c1"></span><span class="cross c2"></span></div><form class="box" id="lf">
-    <div class="logo"><b class="wm">MOS<sup>®</sup></b><div><small class="eyebrow">Marketing OS</small><small>نظام تشغيل التسويق</small></div></div>
+  $('#root').innerHTML = `<div class="login"><div class="login-hero" aria-hidden="true"><div class="arc"></div><div class="wide">THE <i>OS</i> FOR<br>MARKETING</div><p>عقل البراند، المحتوى، التصميم، الفيديو، النشر والأداء… في نظام تشغيل واحد.</p></div><form class="box" id="lf">
+    <div class="logo"><b class="wm">MARKETING<i>OS</i></b><small>نظام تشغيل التسويق</small></div>
     <h1>تسجيل الدخول</h1><p class="muted sm">أدخل كلمة المرور التي وضعتها في Vercel (ADMIN_PASSWORD).</p>
     <label class="lbl" for="pw">كلمة المرور</label>
     <input class="field" id="pw" type="password" autocomplete="current-password" required>
@@ -312,12 +312,13 @@ function applyBrandTheme() {
   const on = store.get('mos-brandui') !== 'off';
   if (!c || !on) { ['--brand', '--brand-text', '--brand-soft', '--brand-2'].forEach((k) => r.removeProperty(k)); document.documentElement.classList.remove('branded'); return; }
   const dark = document.documentElement.dataset.theme === 'dark';
-  // the brand colour becomes the neon accent: it must stay bright enough for black text on top
+  // the brand colour becomes the accent (pill buttons, selection): keep it deep enough for white text
   let main = c;
-  for (let i = 0; i < 8 && lum(main) < 0.32; i++) main = hexMix(main, 'w', 0.18);
+  for (let i = 0; i < 8 && lum(main) > 0.3; i++) main = hexMix(main, 'b', 0.15);
+  if (dark && lum(main) < 0.03) main = hexMix(main, 'w', 0.3);
   const second = (S.brand.visual.colors || []).find((x) => x !== c && /^#[0-9a-f]{6}$/i.test(x)) || hexMix(main, 'w', 0.4);
   r.setProperty('--brand', main);
-  r.setProperty('--brand-text', lum(main) > 0.28 ? '#0A0A0A' : '#FFFFFF');
+  r.setProperty('--brand-text', '#FFFFFF');
   r.setProperty('--brand-soft', dark ? hexMix(main, 'b', 0.78) : hexMix(main, 'w', 0.9));
   r.setProperty('--brand-2', second);
   document.documentElement.classList.add('branded');
@@ -328,7 +329,7 @@ function renderShell() {
   const b = S.brand;
   $('#root').innerHTML = `<div class="app">
     <aside class="side" id="side">
-      <div class="logo"><b class="wm">MOS<sup>®</sup></b><div><small class="eyebrow">Marketing OS</small><small>نظام تشغيل التسويق</small></div></div>
+      <div class="logo"><b class="wm">MARKETING<i>OS</i></b><small>نظام تشغيل التسويق</small></div>
       <button class="brand-btn" id="brandBtn" data-menu>${brandAvatar(b)}<span class="grow">${b ? `<b>${esc(b.name)}</b><small>البراند النشط</small>` : '<b>لا يوجد براند</b><small>أنشئ أول براند</small>'}</span>${ic('chev')}</button>
       <nav class="nav" id="nav">${NAV.map(([k, l, phase]) => k === 'g' ? `<div class="grp eyebrow">${l}</div>` :
         `<a data-p="${k}" tabindex="0" class="${S.page === k ? 'on' : ''}">${ic(k)}${esc(l)}${phase ? `<span class="soon">م${phase}</span>` : ''}</a>`).join('')}</nav>
@@ -467,21 +468,15 @@ PAGES.home = async () => {
   const series = ov.usage.days.map((d) => d.content + d.image + d.tts);
   const maxDay = Math.max(1, ...series);
   view(`
-  <section class="hero mb16">
-    <div class="hero-copy">
-      <span class="tag">${b ? 'Active brand · ' + esc(b.name) : 'Welcome to Marketing OS'}</span>
-      <h2 class="mega">${b ? `نسوّق <span class="o">${arrow('lg')}</span> لـ<br><span class="mark">${esc(b.name)}</span>` : `نبني براندات <span class="mark">تتحرّك</span>`}</h2>
-      <p class="lead">${b ? 'عقل براند مكتمل + مفاتيحك الخاصة = محتوى جاهز للنشر، تصاميم بخط براندك، فيديو، تعليق صوتي، وخطة شهرية.' : 'ابدأ بإنشاء أول براند. النظام يقرأ موقعه، يفهم ما يبيعه، ويبني عقله تلقائياً.'}</p>
-      <div class="flex wrap mt16" style="gap:14px">${b ? `<button class="linkcta" data-go="${target}"><span>${label}</span>${arrow()}</button><button class="btn ghost sm" data-go="studio">الاستوديو</button>` : `<button class="linkcta" id="hb2"><span>براند جديد</span>${arrow()}</button>`}</div>
-      ${b ? `<div class="steps mt16">${steps.map(([l, ok], i) => `<span class="${ok ? 'done' : i === firstOpen ? 'now' : ''}">${ok ? '✓ ' : ''}${l}</span>`).join('')}</div>` : ''}
+  <section class="cine mb16">
+    <div class="arc" aria-hidden="true"></div><div class="glow" aria-hidden="true"></div>
+    <div class="cine-in">
+      <div class="wide">THE <i>OS</i> FOR<br>${b ? esc(b.name).toUpperCase() : 'MARKETING'}</div>
+      <p class="lead">${b ? `عقل براند ${esc(b.name)} جاهز بنسبة ${ready.score}% · محتوى، تصاميم بخط براندك، فيديو، تعليق صوتي، نشر وأداء… في نظام تشغيل واحد.` : 'ابدأ بإنشاء أول براند. النظام يقرأ موقعه، يفهم ما يبيعه، ويبني عقله تلقائياً.'}</p>
+      <div class="flex wrap" style="gap:10px;justify-content:center">${b ? `<button class="pill dark" data-go="studio">الاستوديو</button><button class="pill grad" data-go="${target}">${label}</button>` : `<button class="pill grad" id="hb2">براند جديد</button>`}</div>
+      ${b ? `<div class="steps mt16" style="justify-content:center">${steps.map(([l, ok], i) => `<span class="${ok ? 'done' : i === firstOpen ? 'now' : ''}">${ok ? '✓ ' : ''}${l}</span>`).join('')}</div>` : ''}
     </div>
-    <div class="hero-art" aria-hidden="true">
-      <div class="blob b1"></div><div class="blob b2"></div><div class="blob b3"></div>
-      <svg class="globe" viewBox="0 0 100 100"><circle cx="50" cy="50" r="46"/><ellipse cx="50" cy="50" rx="20" ry="46"/><ellipse cx="50" cy="50" rx="38" ry="46"/><path d="M4 50h92M10 28h80M10 72h80"/></svg>
-      <span class="cross c1"></span><span class="cross c2"></span>
-      <div class="orb"><svg viewBox="0 0 100 100"><defs><path id="orbpath" d="M50 50m-36 0a36 36 0 1 1 72 0a36 36 0 1 1-72 0"/></defs><text><textPath href="#orbpath">MARKETING OS · BRAND BRAIN · STUDIO · </textPath></text></svg>${arrow('dark')}</div>
-      ${b ? `<div class="counter"><b>${String(Math.max(1, steps.filter((x) => x[1]).length)).padStart(2, '0')}</b><i></i><span>${String(steps.length).padStart(2, '0')}</span></div>` : ''}
-    </div>
+    <span class="cursor c1">${ic('arrow')}Brand Brain</span><span class="cursor c2">${ic('arrow')}Studio</span>
   </section>
   <div class="flex wrap mb16" style="gap:8px">${b ? (b.gate1?.approved ? chip('بوابة 1 معتمدة', 'em') : chip('بوابة 1 بانتظار موافقتك', 'am')) : ''}${ov.providers.text ? chip(`الكتابة: ${ov.providers.text.name || ov.providers.text.provider}`, '', false) : chip('لا يوجد مفتاح AI', 'ro')}</div>
 
@@ -2762,7 +2757,7 @@ PAGES.approvals = async () => {
 // ---------- setup (database not connected yet) ----------
 function renderSetup(st) {
   $('#root').innerHTML = `<div class="login"><div class="box" style="max-width:560px">
-    <div class="logo"><b class="wm">MOS<sup>®</sup></b><div><small class="eyebrow">Marketing OS</small><small>إعداد أول مرة</small></div></div>
+    <div class="logo"><b class="wm">MARKETING<i>OS</i></b><small>إعداد أول مرة</small></div>
     <h1>اربط قاعدة البيانات</h1><p class="muted sm">المنصة تعمل، لكن تحتاج مكاناً تحفظ فيه البراندات والمفاتيح والمحتوى. خطوة واحدة في Vercel (مجانية):</p>
     <div class="rows mt16">${[
       ['افتح مشروع marketing-os في Vercel ← تبويب Storage', st.db],
