@@ -354,7 +354,7 @@ module.exports = async (req, res) => {
       const im = sub && sub.match(/^images\/([a-z0-9]+)$/);
       if (im && method === 'DELETE') { await content.deleteImage(id, im[1]); return send(res, 200, { ok: true }); }
 
-      if (sub === 'voices') return send(res, 200, { voices: await eleven.voices(id) });
+      if (sub === 'voices') { const list = await eleven.voices(id); return send(res, 200, { voices: list, note: list.note || null }); }
       if (sub === 'audio') return send(res, 200, { items: await eleven.history(id, Number(query.get('limit')) || 30) });
       if (sub === 'tts' && method === 'POST') {
         const body = await readBody(req);

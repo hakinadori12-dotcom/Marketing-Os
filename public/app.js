@@ -782,7 +782,7 @@ PAGES.voice = async () => {
   }
   drawVoice({ loading: !S.voices, pool: k.summary });
   try {
-    if (!S.voices) S.voices = (await api(`/api/brands/${id}/voices`)).voices;
+    if (!S.voices) { const vr = await api(`/api/brands/${id}/voices`); S.voices = vr.voices; if (vr.note) toast(`تعذّر جلب أصوات حسابك (${vr.note}). تظهر الأصوات الجاهزة من ElevenLabs.`, true); }
     if (!S.audio) S.audio = (await api(`/api/brands/${id}/audio`)).items;
   } catch (e) { toast(e.message, true); S.voices = S.voices || []; S.audio = S.audio || []; }
   if (S.page === 'voice' && S.brand?.id === id) drawVoice({ pool: k.summary });
