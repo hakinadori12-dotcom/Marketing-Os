@@ -172,7 +172,7 @@ function openMenu(anchor, items, { search = false, width } = {}) {
 document.addEventListener('mousedown', (e) => { if (openMenuEl && !openMenuEl.contains(e.target) && !e.target.closest('[data-menu]')) closeMenu(); });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeMenu(); closeModal(); } });
 addEventListener('resize', closeMenu);
-addEventListener('scroll', closeMenu, true);
+addEventListener('scroll', (e) => { if (openMenuEl && e.target instanceof Node && openMenuEl.contains(e.target)) return; closeMenu(); }, true);
 
 // ---------------- modal ----------------
 function modal(html, onMount) {
@@ -932,13 +932,16 @@ async function loadModels(kind, force = false) {
   return S.mcache[kind];
 }
 function aiOf(kind) {
-  const first = S.mcache[kind]?.models.find((m) => !m.soon);
-  return S.pick[kind] || S.mcache[kind]?.current || (first ? { provider: first.provider, model: first.model } : null);
+  return S.pick[kind] || { provider: 'auto' };
+}
+function fallbackNote(r) {
+  if (r?.fallback) toast(`النموذج ${r.fallback.from.join('، ')} لم يعمل، فاستُعمل ${r.model || ''} بدلاً منه`);
 }
 function pickerHTML(kind) {
   const cur = aiOf(kind);
-  const pname = cur ? (S.mcache[kind]?.models.find((m) => m.provider === cur.provider)?.providerName || cur.provider) : '';
-  return `<div class="sel picker"><button class="sel-btn" data-mp="${kind}" data-menu title="${KIND_L[kind]}">${ic(kind === 'text' ? 'edit' : kind === 'image' ? 'studio' : 'play')}<span class="lab">${cur ? `${esc(pname)} <span class="muted xs ltr">· ${esc(cur.model)}</span>` : 'اختر النموذج'}</span>${ic('chev')}</button></div>`;
+  const auto = cur.provider === 'auto';
+  const pname = auto ? '' : (S.mcache[kind]?.models.find((m) => m.provider === cur.provider)?.providerName || cur.provider);
+  return `<div class="sel picker"><button class="sel-btn" data-mp="${kind}" data-menu title="${KIND_L[kind]}">${ic(auto ? 'sparkle' : kind === 'text' ? 'edit' : kind === 'image' ? 'studio' : 'play')}<span class="lab">${auto ? 'تلقائي <span class="muted xs">· الأفضل للمهمة + بديل عند الفشل</span>' : `${esc(pname)} <span class="muted xs ltr">· ${esc(cur.model)}</span>`}</span>${ic('chev')}</button></div>`;
 }
 function bindPicker(root, onChange) {
   $$('[data-mp]', root).forEach((btn) => (btn.onclick = async () => {
@@ -948,9 +951,9 @@ function bindPicker(root, onChange) {
     if (!data.models.length) return openMenu(btn, [{ label: 'لا توجد نماذج مناسبة', desc: 'اربط مفتاحاً يدعم ' + KIND[kind], icon: 'plug', onClick: () => go('providers') }], { width: 300 });
     const groups = {};
     for (const m of data.models) (groups[m.providerName] = groups[m.providerName] || []).push(m);
-    const items = [];
+    const items = kind === 'video' ? [] : [{ label: '✦ تلقائي', desc: 'يختار أفضل نموذج للمهمة، وإذا فشل يجرّب البديل وحده', selected: cur.provider === 'auto', onClick: () => { S.pick[kind] = { provider: 'auto' }; store.set('mos-pick', JSON.stringify(S.pick)); onChange && onChange(); } }, { divider: true }];
     for (const [name, list] of Object.entries(groups)) {
-      if (items.length) items.push({ divider: true });
+      if (items.length && !items[items.length - 1].divider) items.push({ divider: true });
       for (const m of list) items.push({ label: m.model, desc: name + (data.current?.provider === m.provider && data.current?.model === m.model ? ' · الافتراضي' : '') + (m.soon && kind === 'video' ? ' · قريباً' : ''), selected: cur?.provider === m.provider && cur?.model === m.model, onClick: () => { S.pick[kind] = { provider: m.provider, model: m.model }; store.set('mos-pick', JSON.stringify(S.pick)); onChange && onChange(); } });
     }
     items.push({ divider: true }, { label: 'تحديث القائمة من المزوّدين', icon: 'refresh', onClick: async () => { delete S.mcache[kind]; await loadModels(kind, true); onChange && onChange(); } });
@@ -1166,7 +1169,8 @@ async function drawCreate() {
       S.batches = null; S.ov = null;
       S.batch = batch; S.ctab = 'results';
       PAGES.create();
-      toast(`تم توليد ${batch.items.length} عنصر`);
+      toast(`تم توليد ${batch.items.length} عنصر · ${batch.model}`);
+      if (batch.fallback) fallbackNote({ fallback: batch.fallback, model: batch.model });
     } catch (err) { toast(err.message, true); }
   });
 }
@@ -1332,7 +1336,7 @@ PAGES.studio = async () => {
   if (!S.prov) await loadProviders().catch(() => null);
   if (S.stab === 'video') return drawVideo();
   await loadModels('image').catch(() => null);
-  if (!aiOf('image')) {
+  if (!S.mcache.image?.models.length) {
     view(`<div class="empty"><span class="ic">${ic('studio')}</span><h3>اربط مزوّد صور</h3><p>استوديو الصور يعمل بمفتاحك: Gemini (Nano Banana) أو OpenAI (GPT Image) أو xAI (Grok).</p><button class="btn primary" id="gp">${ic('plug')}المفاتيح والمزوّدون</button></div>`);
     $('#gp').onclick = () => go('providers');
     return;
@@ -1374,7 +1378,7 @@ function drawStudio() {
   $('#ilogo', v).onchange = (e) => (g.useLogo = e.target.checked);
   $('#igo', v).onclick = (e) => busy(e.currentTarget, async () => {
     if (!g.prompt.trim()) return toast('اكتب وصف الصورة', true);
-    try { const img = await api(`/api/brands/${b.id}/images`, { method: 'POST', body: { ...g, ai: aiOf('image') } }); S.images = [img, ...S.images]; S.ov = null; drawStudio(); toast(`تم · ${(img.ms / 1000).toFixed(1)} ث`); } catch (err) { toast(err.message, true); }
+    try { const img = await api(`/api/brands/${b.id}/images`, { method: 'POST', body: { ...g, ai: aiOf('image') } }); S.images = [img, ...S.images]; S.ov = null; drawStudio(); toast(`تم · ${img.model} · ${(img.ms / 1000).toFixed(1)} ث`); fallbackNote(img); } catch (err) { toast(err.message, true); }
   });
   $$('[data-re]', v).forEach((x) => (x.onclick = () => { const im = S.images.find((y) => y.id === x.dataset.re); Object.assign(g, { prompt: im.prompt, aspect: im.aspect, style: im.style || 'none' }); drawStudio(); }));
   $$('[data-del]', v).forEach((x) => (x.onclick = async () => {
