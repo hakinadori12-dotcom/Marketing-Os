@@ -130,7 +130,7 @@ async function overview() {
   return {
     brands: list.map((b, i) => ({ ...b, keys: perBrand[i] })),
     keys,
-    providers: { connected: provs.filter((p) => p.connected).length, text: st.text || null, image: st.image || null },
+    providers: { connected: provs.filter((p) => p.connected).length, text: st.text ? { ...st.text, name: provs.find((p) => p.id === st.text.provider)?.name || st.text.provider } : null, image: st.image || null },
     usage: { ...totals, ttsCount: totals.tts, ttsChars: totals.chars, days: days.map((d) => ({ day: d, ...byDay[d] })) },
     recent: logs.slice(0, 12),
   };
@@ -310,6 +310,8 @@ module.exports = async (req, res) => {
         }
       }
       if (sub === 'logo' && method === 'POST') return send(res, 200, await brands.uploadLogo(id, await readBody(req)));
+      if (sub === 'guide' && method === 'POST') return send(res, 200, await brands.analyzeGuide(id, await readBody(req)));
+      if (sub === 'guide' && method === 'DELETE') return send(res, 200, await brands.removeGuide(id));
       if (sub === 'analyze' && method === 'POST') return send(res, 200, await brands.analyze(id, await readBody(req)));
 
       if (sub === 'keys') {

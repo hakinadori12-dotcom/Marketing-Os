@@ -388,7 +388,7 @@ PAGES.home = async () => {
     <p>${b ? 'عقل براند مكتمل + مفتاحك الخاص = محتوى جاهز للنشر، صور إعلانية، تعليق صوتي، وخطة شهرية.' : 'ابدأ بإنشاء أول براند في محفظتك. النظام سيحلّل موقعه ويبني عقله.'}</p>
     ${b ? `<div class="steps">${steps.map(([l, ok], i) => `<span class="${ok ? 'done' : i === firstOpen ? 'now' : ''}">${ok ? '✓ ' : ''}${l}</span>`).join('')}</div>` : ''}
   </div>
-  <div class="entity-foot">${b ? (b.gate1?.approved ? chip('بوابة 1 معتمدة', 'em') : chip('بوابة 1 بانتظار موافقتك', 'am')) : ''}${ov.providers.text ? chip(`الكتابة: ${ov.providers.text.provider}`, '', false) : chip('لا يوجد مفتاح AI', 'am')}<span class="grow"></span>
+  <div class="entity-foot">${b ? (b.gate1?.approved ? chip('بوابة 1 معتمدة', 'em') : chip('بوابة 1 بانتظار موافقتك', 'am')) : ''}${ov.providers.text ? chip(`الكتابة: ${ov.providers.text.name || ov.providers.text.provider}`, '', false) : chip('لا يوجد مفتاح AI', 'am')}<span class="grow"></span>
     ${b ? `<button class="btn ghost sm" data-go="studio">الاستوديو</button><button class="btn primary sm" data-go="${target}">${label}</button>` : `<button class="btn primary sm" id="hb2">${ic('plus')}براند جديد</button>`}</div></div>
 
   <div class="grid c4 mb16">
@@ -396,7 +396,7 @@ PAGES.home = async () => {
        ['studio', 'صور مولّدة', fmt(ov.usage.image), 'آخر 14 يوماً'],
        ['voice', 'تعليقات صوتية', fmt(ov.usage.tts), `${short(ov.usage.chars)} حرف`],
        ['plug', 'مزوّدون مربوطون', fmt(ov.providers.connected), `${fmt(ov.keys.active)} مفتاح ElevenLabs نشط`]]
-      .map(([i, l, n, d]) => `<div class="card stat"><div class="flex"><span class="ic">${ic(i)}</span><span class="sec sm">${l}</span></div><div class="num">${n}</div><span class="muted xs">${d}</span></div>`).join('')}
+      .map(([i, l, n, d], ix) => `<div class="card stat ${ix === 0 ? 'feature' : ''}"><div class="flex"><span class="ic">${ic(i)}</span><span class="sec sm">${l}</span></div><div class="num">${n}</div><span class="muted xs">${d}</span></div>`).join('')}
   </div>
 
   <div class="grid c12">
@@ -522,10 +522,29 @@ function brainProducts() {
     <button class="btn primary mt16" style="width:100%" id="padd">${ic('plus')}إضافة</button></div></div>`;
 }
 
+function guideCard(b) {
+  const g = b.visual?.guide;
+  if (!g) return `<div class="card s12"><div class="card-h"><h3>دليل الهوية البصرية</h3><div class="end">${chip('اختياري', '', false)}</div></div>
+    <p class="muted sm">ارفع دليل البراند (Brand Book) أو ملف نظام التصميم: PDF أو MD أو TXT. النظام يستخرج الألوان وأدوارها، والخطوط، والقواعد والممنوعات، ويطبّقها على كل الصور والمحتوى.</p>
+    <div class="grid c2 mt12" style="gap:12px">
+      <label class="drop" id="gdrop" style="display:block">${ic('upload')}<div class="mt8"><b>ارفع الملف</b></div><div class="xs">PDF · MD · TXT · حتى 4MB</div><input type="file" id="gfile" accept=".pdf,.md,.markdown,.txt,.json,.css,application/pdf,text/*" hidden></label>
+      <div><textarea class="field" id="gtext" data-mic rows="5" placeholder="أو الصق نص الدليل هنا…"></textarea><div class="flex mt8" style="justify-content:flex-end"><button class="btn primary sm" id="gpaste" data-busy="يقرأ الدليل…">${ic('sparkle')}تحليل النص</button></div></div>
+    </div></div>`;
+  return `<div class="card s12"><div class="card-h"><h3>دليل الهوية البصرية</h3><div class="end">${chip('مطبّق على كل التوليدات', 'em')}<span class="muted xs">${esc(g.source)} · ${rel(g.at)}</span>
+      <label class="btn grey sm" style="cursor:pointer">${ic('refresh')}تحديث<input type="file" id="gfile" accept=".pdf,.md,.markdown,.txt,.json,.css,application/pdf,text/*" hidden></label><button class="btn grey icon sm" id="gdel" aria-label="حذف الدليل">${ic('trash')}</button></div></div>
+    <p class="sm">${esc(g.summary)}</p>
+    ${g.colors.length ? `<span class="lbl">الألوان</span><div class="flex wrap" style="gap:10px">${g.colors.map((c) => `<div class="flex" style="gap:8px;min-width:200px"><span class="swatch" style="background:${c.hex};width:34px;height:34px;cursor:default"></span><div><b class="xs">${esc(c.name || c.hex)}</b> <span class="mono xs ltr muted">${c.hex}</span><div class="xs muted">${esc(c.use || '')}</div></div></div>`).join('')}</div>` : ''}
+    ${g.fonts.length ? `<span class="lbl">الخطوط</span><div class="flex wrap">${g.fonts.map((f) => chip(`${f.name}${f.use ? ' · ' + f.use : ''}`, '', false)).join('')}</div>` : ''}
+    <div class="grid c2 mt8" style="gap:16px">
+      ${g.rules.length ? `<div><span class="lbl">القواعد</span><ul class="sm sec" style="padding-inline-start:18px">${g.rules.map((r) => `<li>${esc(r)}</li>`).join('')}</ul></div>` : ''}
+      ${g.donts.length ? `<div><span class="lbl">الممنوعات</span><ul class="sm sec" style="padding-inline-start:18px">${g.donts.map((r) => `<li>${esc(r)}</li>`).join('')}</ul></div>` : ''}
+    </div></div>`;
+}
+
 function brainVisual() {
   const b = S.brand;
   const colors = b.visual?.colors || [];
-  return `<div class="grid c12">
+  return `<div class="grid c12">${guideCard(b)}
     <div class="card s6"><div class="card-h"><h3>الشعار</h3>${b.logo ? `<div class="end">${chip('مرفوع', 'em')}</div>` : ''}</div>
       ${b.logo?.url ? `<div class="inset" style="display:grid;place-items:center;height:180px"><img src="${esc(b.logo.url)}" alt="logo" style="max-width:70%;max-height:150px;object-fit:contain"></div>` : ''}
       <label class="drop mt12" id="drop" style="display:block">${ic('upload')}<div class="mt8"><b>${b.logo ? 'تغيير الشعار' : 'ارفع الشعار'}</b></div><div class="xs">PNG بخلفية شفافة أفضل · حتى 3MB</div><input type="file" id="logoIn" accept="image/png,image/jpeg,image/webp,image/svg+xml" hidden></label>
@@ -634,6 +653,23 @@ function bindBrain(v) {
     const colors = (b.visual?.colors || []).filter((_, i) => i !== Number(x.dataset.delc));
     try { await patchBrand({ visual: { colors } }); } catch (err) { toast(err.message, true); }
   }));
+  // visual identity guide
+  const sendGuide = (body) => api(`/api/brands/${b.id}/guide`, { method: 'POST', body }).then((nb) => { S.brand = nb; toast('تم تحليل الدليل وتطبيقه'); PAGES.brain(); }).catch((e) => toast(e.message, true));
+  const gfile = $('#gfile', v);
+  if (gfile) {
+    const up = (file) => {
+      if (!file) return;
+      if (file.size > 4 * 1024 * 1024) return toast('الملف أكبر من 4MB', true);
+      const r = new FileReader();
+      r.onload = () => { toast('يقرأ الدليل… قد يستغرق دقيقة'); sendGuide({ dataUrl: r.result, filename: file.name }); };
+      r.readAsDataURL(file);
+    };
+    gfile.onchange = () => up(gfile.files[0]);
+    const d = $('#gdrop', v);
+    if (d) { d.ondragover = (e) => { e.preventDefault(); d.classList.add('over'); }; d.ondragleave = () => d.classList.remove('over'); d.ondrop = (e) => { e.preventDefault(); d.classList.remove('over'); up(e.dataTransfer.files[0]); }; }
+  }
+  $('#gpaste', v) && ($('#gpaste').onclick = (e) => busy(e.currentTarget, () => sendGuide({ text: $('#gtext').value, filename: 'نص ملصوق' })));
+  $('#gdel', v) && ($('#gdel').onclick = async () => { if (!(await confirmBox('حذف الدليل؟', 'لن تُطبّق قواعده على التوليدات القادمة.', 'حذف', true))) return; try { S.brand = await api(`/api/brands/${b.id}/guide`, { method: 'DELETE' }); PAGES.brain(); } catch (e) { toast(e.message, true); } });
   // analyze
   $('#arun', v) && ($('#arun').onclick = (e) => busy(e.currentTarget, async () => {
     try {
@@ -693,7 +729,7 @@ function drawKeys() {
   <div class="grid c4 mb16">
     ${[['keys', 'كل المفاتيح', fmt(s.total), `${fmt(s.active || 0)} نشط`], ['check', 'نشطة', fmt(s.active || 0), 'جاهزة للتوليد'],
        ['x', 'منتهية / غير صالحة', fmt((s.exhausted || 0) + (s.invalid || 0)), `${fmt(s.error || 0)} خطأ مؤقت · ${fmt(s.disabled || 0)} معطّل`], ['voice', 'الأحرف المتبقية', short(s.remaining), `${pct}% من ${short(s.limit)}`]]
-      .map(([i, l, n, d]) => `<div class="card stat"><div class="flex"><span class="ic">${ic(i)}</span><span class="sec sm">${l}</span></div><div class="num">${n}</div><span class="muted xs">${d}</span></div>`).join('')}
+      .map(([i, l, n, d], ix) => `<div class="card stat ${ix === 0 ? 'feature' : ''}"><div class="flex"><span class="ic">${ic(i)}</span><span class="sec sm">${l}</span></div><div class="num">${n}</div><span class="muted xs">${d}</span></div>`).join('')}
   </div>
   <div class="toolbar">${pills('kf', [['all', `الكل ${s.total}`], ['active', 'نشط'], ['exhausted', 'انتهى الرصيد'], ['invalid', 'غير صالح'], ['error', 'خطأ'], ['disabled', 'معطّل']], S.keyFilter)}
     <div class="end">
@@ -882,7 +918,7 @@ PAGES.api = async () => {
   const v = view(`
   <div class="grid c4 mb16">
     ${[['api', 'الطلبات · 30 يوم', fmt(total.calls)], ['x', 'أخطاء', fmt(total.errors)], ['create', 'Tokens مستهلكة', short(total.tok)], ['voice', 'أحرف ElevenLabs المتبقية', short(s.eleven.remaining || 0)]]
-      .map(([i, l, n]) => `<div class="card stat"><div class="flex"><span class="ic">${ic(i)}</span><span class="sec sm">${l}</span></div><div class="num">${n}</div></div>`).join('')}
+      .map(([i, l, n], ix) => `<div class="card stat ${ix === 0 ? 'feature' : ''}"><div class="flex"><span class="ic">${ic(i)}</span><span class="sec sm">${l}</span></div><div class="num">${n}</div></div>`).join('')}
   </div>
   <div class="grid c12">
     <div class="card s8"><div class="card-h"><h3>المزوّدون</h3></div>
