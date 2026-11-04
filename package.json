@@ -1,0 +1,9 @@
+{
+  "name": "marketing-os",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Marketing OS: brand brain, content generator, monthly plan, image studio, voices (BYOK)",
+  "engines": {
+    "node": ">=20"
+  }
+}
