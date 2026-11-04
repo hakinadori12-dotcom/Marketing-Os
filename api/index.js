@@ -295,6 +295,16 @@ module.exports = async (req, res) => {
       res.setHeader('Cache-Control', 'no-store');
       return res.end();
     }
+    if (path === '/api/social/callback' && method === 'GET') {
+      const bid = String(query.get('brand') || '');
+      const err2 = query.get('error');
+      const to = err2 ? `/?social=${encodeURIComponent(String(query.get('error_message') || err2).slice(0, 200))}#calendar` : `/?social=ok&acc=${encodeURIComponent(String(query.get('username') || query.get('p') || '').slice(0, 60))}#calendar`;
+      if (/^[a-f0-9]+$/.test(bid)) await store.logEvent({ kind: 'connect', brand: bid, provider: 'zernio', model: query.get('p') || '', status: err2 ? 400 : 200 }).catch(() => {});
+      res.statusCode = 302;
+      res.setHeader('Location', to);
+      res.setHeader('Cache-Control', 'no-store');
+      return res.end();
+    }
     if (path === '/api/fonts' && method === 'GET') return send(res, 200, { fonts: await store.readJSON('fonts.json', {}) });
     if (path === '/api/fonts' && method === 'POST') {
       const body = await readBody(req);
@@ -388,7 +398,8 @@ module.exports = async (req, res) => {
       if (sub === 'occasions') {
         const [y, mo] = String(query.get('month') || '').split('-').map(Number);
         const now = new Date();
-        return send(res, 200, { occasions: content.occasions(y || now.getFullYear(), mo || now.getMonth() + 1) });
+        const br = await brands.get(id);
+        return send(res, 200, { occasions: content.occasions(y || now.getFullYear(), mo || now.getMonth() + 1, br.fields?.market?.value || ''), market: br.fields?.market?.value || '' });
       }
       if (sub === 'images') {
         if (method === 'GET') return send(res, 200, { images: await content.listImages(id) });
@@ -406,15 +417,18 @@ module.exports = async (req, res) => {
       if (sub === 'research/competitors' && method === 'POST') return send(res, 200, await research.add(id, await readBody(req)));
       if (sub === 'research/cross' && method === 'POST') return send(res, 200, await research.cross(id));
       if (sub === 'research/export' && method === 'GET') {
-        const f = await research.exportCSV(id, query.get('c'));
+        const f = require('../lib/exporter').render(await research.reportModel(id, { c: query.get('c'), kind: query.get('kind') }), query.get('format') || 'csv');
         res.statusCode = 200;
-        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-        res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(f.name)}`);
+        res.setHeader('Content-Type', f.type);
+        res.setHeader('Content-Disposition', `${f.inline ? 'inline' : 'attachment'}; filename="report.${f.name.split('.').pop()}"; filename*=UTF-8''${encodeURIComponent(f.name)}`);
+        res.setHeader('Cache-Control', 'no-store');
         return res.end(f.body);
       }
+      if (sub === 'research/compare' && method === 'POST') return send(res, 200, await research.compare(id, await readBody(req)));
       const rc = sub && sub.match(/^research\/competitors\/([a-f0-9]+)(\/analyze)?$/);
       if (rc && rc[2] && method === 'POST') return send(res, 200, await research.analyze(id, rc[1]));
       if (rc && !rc[2] && method === 'DELETE') { await research.remove(id, rc[1]); return send(res, 200, { ok: true }); }
+      if (sub === 'approvals' && method === 'GET') return send(res, 200, await require('../lib/approvals').list(id));
       if (sub === 'research/sheets' && method === 'GET') return send(res, 200, await gsheets.status(id));
       if (sub === 'research/sheets/master' && method === 'POST') return send(res, 200, await gsheets.syncMaster(id));
       if (sub === 'research/sheets/pull' && method === 'POST') return send(res, 200, await gsheets.pull(id));
@@ -425,11 +439,35 @@ module.exports = async (req, res) => {
       if (ro && method === 'PATCH') return send(res, 200, await research.setOpportunity(id, ro[1], (await readBody(req)).status));
       if (sub === 'identity/palettes' && method === 'POST') return send(res, 200, { palettes: await identity.palettes(id, await readBody(req)) });
       if (sub === 'identity/logos' && method === 'POST') return send(res, 200, await identity.logos(id, await readBody(req)));
+      const pph = sub && sub.match(/^products\/([a-z0-9]+)\/photo$/);
+      if (pph && method === 'POST') return send(res, 200, await brands.productPhoto(id, pph[1], await readBody(req)));
+      if (sub === 'identity/fonts' && method === 'POST') return send(res, 200, { pairings: await identity.fonts(id, await readBody(req)) });
+      if (sub === 'identity/use-fonts' && method === 'POST') return send(res, 200, await identity.useFonts(id, await readBody(req)));
       if (sub === 'identity/use-logo' && method === 'POST') return send(res, 200, await identity.useLogo(id, await readBody(req)));
 
       if (sub === 'schedule') {
         if (method === 'GET') return send(res, 200, { items: await schedule.list(id, query.get('month')) });
         if (method === 'POST') return send(res, 200, await schedule.add(id, await readBody(req)));
+      }
+      const social = require('../lib/social');
+      if (sub === 'social' && method === 'GET') return send(res, 200, await social.status(id));
+      if (sub === 'social/connect' && method === 'POST') return send(res, 200, { url: await social.connectUrl(id, (await readBody(req)).platform, originOf(req)) });
+      const sa = sub && sub.match(/^social\/accounts\/([A-Za-z0-9_-]+)$/);
+      if (sa && method === 'DELETE') return send(res, 200, await social.disconnect(id, sa[1]));
+      if (sub === 'insights' && method === 'GET') return send(res, 200, { ...(await social.analytics(id, { days: Number(query.get('days')) || 90 }).catch((e) => ({ posts: [], note: e.message }))), learned: await store.readJSON(`insights/${id}.json`, null), social: await social.status(id) });
+      if (sub === 'insights/learn' && method === 'POST') return send(res, 200, await require('../lib/insights').learn(id, await readBody(req)));
+      const sp = sub && sub.match(/^schedule\/([a-z0-9]+)\/(publish|sync)$/);
+      if (sp && method === 'POST') {
+        const item = await schedule.get(id, sp[1]);
+        if (sp[2] === 'publish') {
+          const body = await readBody(req);
+          const r = await social.publish(id, item, { now: Boolean(body.now), timezone: String(body.timezone || 'UTC').slice(0, 60) });
+          return send(res, 200, await schedule.setPublish(id, sp[1], r, r.now ? 'published' : 'queued'));
+        }
+        if (!item.publish?.postId) throw httpError(400, 'هذا المنشور لم يُرسل للنشر التلقائي');
+        const r = await social.postStatus(item.publish.postId);
+        const st = r.status === 'published' ? 'published' : r.status === 'failed' ? 'failed' : item.status;
+        return send(res, 200, await schedule.setPublish(id, sp[1], { status: r.status, links: r.links, syncedAt: new Date().toISOString() }, st));
       }
       const sm = sub && sub.match(/^schedule\/([a-z0-9]+)$/);
       if (sm && method === 'PATCH') return send(res, 200, await schedule.patch(id, sm[1], await readBody(req)));
@@ -443,6 +481,20 @@ module.exports = async (req, res) => {
       if (vm && method === 'GET') return send(res, 200, await video.status(id, vm[1]));
       if (vm && method === 'DELETE') { await video.remove(id, vm[1]); return send(res, 200, { ok: true }); }
 
+      if (sub === 'voices/recommend' && method === 'POST') {
+        const body = await readBody(req);
+        const list = await eleven.voices(id);
+        const br = await brands.get(id);
+        const txt = String(body.text || '').slice(0, 1500);
+        const cand = list.slice(0, 120).map((x) => `${x.id} | ${x.name} | ${Object.entries(x.labels || {}).map(([k, v]) => `${k}: ${v}`).join(', ')}`).join('\n');
+        const out = await ai.json(`Pick the 3 best voices for this voice-over, best first. Consider language/accent of the script (Arabic dialect: Gulf, Saudi, Egyptian, Moroccan, MSA…), the brand tone and the use (ad, reel, explainer, story).
+Brand: ${br.name}. Tone: ${br.fields?.tone?.value || ''}. Audience: ${br.fields?.audience?.value || ''}. Market: ${br.fields?.market?.value || ''}.
+Script: ${txt || '(no script yet: recommend for the brand in general)'}
+Voices (id | name | labels):
+${cand}`, { type: 'object', properties: { picks: { type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, why: { type: 'string', description: 'one sentence in Arabic' }, settings: { type: 'string', description: 'short Arabic tip: stability/speed/style for this script' } }, required: ['id', 'why'] } } }, required: ['picks'] }, { kind: 'voice', brand: id });
+        const picks = (out.json.picks || []).filter((p) => list.some((x) => x.id === p.id)).slice(0, 3).map((p) => ({ id: p.id, why: String(p.why || ''), settings: String(p.settings || '') }));
+        return send(res, 200, { picks });
+      }
       if (sub === 'voices') { const list = await eleven.voices(id); return send(res, 200, { voices: list, note: list.note || null }); }
       if (sub === 'audio') return send(res, 200, { items: await eleven.history(id, Number(query.get('limit')) || 30) });
       if (sub === 'tts' && method === 'POST') {

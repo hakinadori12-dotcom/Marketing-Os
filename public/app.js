@@ -79,12 +79,42 @@ function toast(msg, err = false) {
   setTimeout(() => el.remove(), err ? 6000 : 3200);
 }
 
+// Long tasks keep running when the user moves to another page: the button's job is tracked
+// globally (key = data-job or the button id), shown in the jobs pill, and re-marked busy on return.
+const JOBS = new Map();
 async function busy(btn, fn) {
-  if (!btn || btn.disabled) return fn();
+  if (!btn) return fn();
+  const key = btn.dataset.job || btn.id || '';
+  if (key && JOBS.has(key)) return toast('هذه العملية ما زالت تعمل…');
+  if (btn.disabled) return;
   const html = btn.innerHTML;
+  const label = (btn.dataset.jobLabel || btn.textContent || '').trim().slice(0, 60);
+  const page0 = S.page;
   btn.disabled = true;
   btn.innerHTML = `<span class="spin"></span>${btn.dataset.busy || ''}`;
-  try { return await fn(); } finally { if (btn.isConnected) { btn.disabled = false; btn.innerHTML = html; } }
+  if (key) { JOBS.set(key, { label, page: page0, html, busyText: btn.dataset.busy || '', t: Date.now() }); drawJobs(); }
+  try { return await fn(); } finally {
+    if (key) {
+      JOBS.delete(key); drawJobs();
+      if (S.page !== page0) toast(`✓ اكتمل: ${label}`);
+      $$(`[data-job="${key}"], #${CSS.escape(key)}`).forEach((b2) => { if (b2.dataset.jobBusy) { b2.disabled = false; b2.innerHTML = b2.dataset.jobBusy; delete b2.dataset.jobBusy; } });
+    }
+    if (btn.isConnected) { btn.disabled = false; btn.innerHTML = html; }
+  }
+}
+function markJobs(root) {
+  for (const [key, j] of JOBS) {
+    $$(`[data-job="${key}"], #${CSS.escape(key)}`, root).forEach((b2) => { if (b2.tagName !== 'BUTTON' || b2.dataset.jobBusy) return; b2.dataset.jobBusy = b2.innerHTML; b2.disabled = true; b2.innerHTML = `<span class="spin"></span>${j.busyText}`; });
+  }
+}
+const PAGE_NAMES = () => Object.fromEntries(Object.entries(typeof TITLES === 'object' ? TITLES : {}).map(([k, v]) => [k, v[0]]));
+function drawJobs() {
+  let el = $('#jobs');
+  if (!JOBS.size) { el && el.remove(); return; }
+  if (!el) { el = document.createElement('div'); el.id = 'jobs'; el.className = 'jobs'; document.body.append(el); }
+  const names = PAGE_NAMES();
+  el.innerHTML = `<b class="xs">يعمل في الخلفية (${JOBS.size})</b>${[...JOBS.values()].map((j) => `<button class="job" data-jp="${j.page}"><span class="spin"></span><span class="grow">${esc(j.label)}</span><span class="muted xs">${esc(names[j.page] || '')}</span></button>`).join('')}`;
+  $$('[data-jp]', el).forEach((x) => (x.onclick = () => go(x.dataset.jp)));
 }
 
 // ---------------- state ----------------
@@ -103,7 +133,7 @@ const S = {
 const NAV = [
   ['g', 'Workspace'], ['home', 'لوحة القيادة'], ['brands', 'البراندات'], ['brain', 'عقل البراند'],
   ['g', 'Create'], ['create', 'إنشاء المحتوى'], ['studio', 'الاستوديو'], ['voice', 'التعليق الصوتي'],
-  ['g', 'Strategy'], ['research', 'بحث المنافسين'], ['approvals', 'الموافقات', 3], ['calendar', 'التقويم والنشر'], ['insights', 'الأداء والتعلّم', 4],
+  ['g', 'Strategy'], ['research', 'بحث المنافسين'], ['approvals', 'الموافقات'], ['calendar', 'التقويم والنشر'], ['insights', 'الأداء والتعلّم'],
   ['g', 'System'], ['providers', 'المفاتيح والمزوّدون'], ['keys', 'مفاتيح ElevenLabs'], ['api', 'لوحة الـ API'],
 ];
 const TITLES = {
@@ -122,8 +152,6 @@ const TITLES = {
   insights: ['الأداء والتعلّم', 'النظام يتعلّم من كل منشور'],
 };
 const SOON = {
-  approvals: [3, 'أربع بوابات: البراند، المفهوم، التصميم، النشر. البوابة الأولى تعمل الآن من صفحة عقل البراند.'],
-  insights: [4, 'الوصول والتفاعل والنقرات لكل منشور، ثم ماذا تعلّم النظام وما يوصي به للمحتوى القادم.'],
 };
 const SRC = { confirmed: ['مؤكد', 'em'], extracted: ['مستخرج', 'am'], inferred: ['مستنتج', 'vi'] };
 const KSTAT = { active: ['نشط', 'em'], exhausted: ['انتهى الرصيد', 'am'], invalid: ['غير صالح', 'ro'], disabled: ['معطّل', ''], error: ['خطأ مؤقت', 'sk'] };
@@ -310,6 +338,7 @@ function view(html) {
   const v = $('#view');
   v.innerHTML = `<div class="page">${html}</div>`;
   enhanceMics(v);
+  markJobs(v);
   requestAnimationFrame(() => placePills(v));
   return v;
 }
@@ -335,6 +364,8 @@ document.addEventListener('click', (e) => {
   if (key === 'ctab') { S.ctab = v; S.batch = null; PAGES.create(); }
   if (key === 'aspect') S.img.aspect = v;
   if (key === 'stab') { S.stab = v; PAGES.studio(); }
+  if (key === 'rtab') { S.rtab = v; PAGES.research(); }
+  if (key === 'af') { S.af = v; PAGES.approvals(); }
 });
 
 // ---------------- brand create ----------------
@@ -508,17 +539,49 @@ function brainIdentity() {
 
 function brainProducts() {
   const p = S.brand.products;
-  return `<div class="grid c12"><div class="card s8"><div class="card-h"><h3>المنتجات والخدمات</h3><div class="end"><span class="muted xs">${p.length} عنصر</span></div></div>
-    ${p.length ? `<div class="tablewrap"><table><thead><tr><th>الاسم</th><th>السعر</th><th>الوصف</th><th>المصدر</th><th></th></tr></thead><tbody>
-      ${p.map((x) => `<tr><td><b>${esc(x.name)}</b></td><td class="tnum">${esc(x.price || '—')}</td><td class="sec sm">${esc(x.description || '')}</td><td>${chip(SRC[x.source]?.[0] || 'مؤكد', SRC[x.source]?.[1] || 'em')}</td>
-      <td><button class="btn grey icon sm" data-delp="${x.id}" aria-label="حذف">${ic('trash')}</button></td></tr>`).join('')}</tbody></table></div>`
+  const missing = p.filter((x) => !x.photo).length;
+  return `<div class="grid c12"><div class="card s8"><div class="card-h"><h3>المنتجات والخدمات</h3><div class="end">${missing ? chip(`${missing} بدون صورة`, 'am') : ''}<span class="muted xs">${p.length} عنصر</span></div></div>
+    ${missing ? `<div class="inset sm mb16">صورة المنتج <b>إلزامية</b> لتوليد صوره: الذكاء الاصطناعي يستعملها كمرجع حتى يُظهر نفس المنتج بالضبط ولا يخترع منتجاً آخر. اضغط «تعديل» لإضافة الصورة والسعر.</div>` : ''}
+    ${p.length ? `<div class="tablewrap"><table><thead><tr><th>الصورة</th><th>الاسم</th><th>السعر</th><th>الوصف</th><th>المصدر</th><th></th></tr></thead><tbody>
+      ${p.map((x) => `<tr><td>${x.photo ? `<img src="${esc(x.photo)}" alt="" style="width:52px;height:52px;object-fit:cover;border-radius:10px;display:block">` : `<button class="btn grey sm" data-ep="${x.id}">${ic('upload')}صورة</button>`}</td>
+      <td><b>${esc(x.name)}</b></td><td class="tnum">${x.price ? esc(x.price) : `<button class="btn ghost sm" data-ep="${x.id}">+ السعر</button>`}</td><td class="sec sm">${esc(x.description || '')}</td><td>${chip(SRC[x.source]?.[0] || 'مؤكد', SRC[x.source]?.[1] || 'em')}</td>
+      <td><div class="flex" style="gap:6px"><button class="btn grey sm" data-ep="${x.id}">${ic('edit')}تعديل</button><button class="btn grey icon sm" data-delp="${x.id}" aria-label="حذف">${ic('trash')}</button></div></td></tr>`).join('')}</tbody></table></div>`
     : `<div class="empty" style="padding:28px"><span class="ic">${ic('studio')}</span><h3>لا توجد منتجات بعد</h3><p>أضف منتجاتك يدوياً أو استخرجها من الموقع عبر التحليل الذكي.</p></div>`}
   </div>
   <div class="card s4"><div class="card-h"><h3>إضافة منتج</h3></div>
-    <label class="lbl" style="margin-top:0">الاسم</label><input class="field" id="pn">
-    <label class="lbl">السعر</label><input class="field" id="pp" placeholder="مثلاً: 189 درهم">
+    <label class="drop" id="pdrop" style="display:block;padding:14px">${ic('upload')}<div class="mt8"><b id="pphl">صورة المنتج (إلزامية)</b></div><div class="xs">PNG / JPG / WEBP · خلفية بسيطة أفضل · حتى 5MB</div><input type="file" id="pph" accept="image/png,image/jpeg,image/webp" hidden></label>
+    <label class="lbl">الاسم</label><input class="field" id="pn">
+    <label class="lbl">السعر</label><input class="field" id="pp" placeholder="مثلاً: 189 درهم أو 49 ر.س">
     <label class="lbl">وصف قصير</label><textarea class="field" id="pd" rows="3"></textarea>
-    <button class="btn primary mt16" style="width:100%" id="padd">${ic('plus')}إضافة</button></div></div>`;
+    <button class="btn primary mt16" style="width:100%" id="padd" data-busy="يحفظ…">${ic('plus')}إضافة</button></div></div>`;
+}
+const readImage = (file, max = 5) => new Promise((ok, no) => {
+  if (!file) return no(new Error('اختر صورة'));
+  if (file.size > max * 1024 * 1024) return no(new Error(`حجم الصورة أكبر من ${max}MB`));
+  const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = () => no(new Error('تعذّرت قراءة الملف')); r.readAsDataURL(file);
+});
+function productModal(x) {
+  const b = S.brand;
+  let photo = null;
+  modal(`<h2>${esc(x.name)}</h2>
+    <div class="flex mt12" style="gap:14px;align-items:flex-start">
+      <label class="drop" style="display:block;width:150px;flex:none;padding:10px;text-align:center">${x.photo ? `<img id="pmimg" src="${esc(x.photo)}" alt="" style="width:100%;height:110px;object-fit:cover;border-radius:10px">` : `<span id="pmimg">${ic('upload')}</span>`}<div class="xs mt8">${x.photo ? 'تغيير الصورة' : 'ارفع الصورة (إلزامية)'}</div><input type="file" id="pmf" accept="image/png,image/jpeg,image/webp" hidden></label>
+      <div class="grow"><label class="lbl" style="margin-top:0">الاسم</label><input class="field" id="pmn" value="${esc(x.name)}">
+        <label class="lbl">السعر</label><input class="field" id="pmp" value="${esc(x.price || '')}" placeholder="مثلاً: 189 درهم أو 49 ر.س"></div></div>
+    <label class="lbl">الوصف</label><textarea class="field" id="pmd" rows="3">${esc(x.description || '')}</textarea>
+    <div class="foot"><button class="btn ghost" data-x>إلغاء</button><button class="btn primary" id="pms" data-busy="يحفظ…">${ic('check')}حفظ</button></div>`, (m) => {
+    $('[data-x]', m).onclick = closeModal;
+    $('#pmf', m).onchange = async (e) => { try { photo = await readImage(e.target.files[0]); $('#pmimg', m).outerHTML = `<img id="pmimg" src="${photo}" alt="" style="width:100%;height:110px;object-fit:cover;border-radius:10px">`; } catch (err) { toast(err.message, true); } };
+    $('#pms', m).onclick = () => busy($('#pms', m), async () => {
+      try {
+        const name = $('#pmn', m).value.trim();
+        if (!name) return toast('اكتب اسم المنتج', true);
+        await patchBrand({ products: b.products.map((p) => (p.id === x.id ? { ...p, name, price: $('#pmp', m).value, description: $('#pmd', m).value, source: 'confirmed' } : p)) });
+        if (photo) { S.brand = await api(`/api/brands/${b.id}/products/${x.id}/photo`, { method: 'POST', body: { dataUrl: photo } }); renderShell(); go('brain', { replace: true }); }
+        closeModal(); toast('تم الحفظ');
+      } catch (err) { toast(err.message, true); }
+    });
+  });
 }
 
 function guideCard(b) {
@@ -543,9 +606,10 @@ function guideCard(b) {
 function brainVisual() {
   const b = S.brand;
   const colors = b.visual?.colors || [];
-  const needs = !b.logo || colors.length < 2;
-  return `<div class="grid c12">${needs ? `<div class="card s12 propose"><div class="flex wrap" style="gap:14px"><span class="ic">${ic('sparkle')}</span><div class="grow"><b>${!b.logo && colors.length < 2 ? 'ما عندكش شعار ولا ألوان؟' : !b.logo ? 'ما عندكش شعار؟' : 'ما عندكش ألوان محددة؟'}</b><p class="muted sm">الذكاء الاصطناعي يقدر يقترح ${colors.length < 2 ? 'لوحات ألوان مناسبة لبراندك وجمهورك وتميّزك عن المنافسين' : ''}${colors.length < 2 && !b.logo ? '، و' : ''}${!b.logo ? 'شعارات تختار منها' : ''}. أنت من يقرر.</p></div>
-    ${colors.length < 2 ? `<button class="btn ghost" id="idpal" data-busy="يقترح…">${ic('sparkle')}اقترح ألواناً</button>` : ''}${!b.logo ? `<button class="btn primary" id="idlogo">${ic('studio')}صمّم شعاراً</button>` : ''}</div></div>` : ''}${guideCard(b)}
+  const needs = !b.logo || colors.length < 2 || !b.visual?.fonts?.heading;
+  const miss = [!b.logo && 'شعار', colors.length < 2 && 'ألوان', !b.visual?.fonts?.heading && 'خطوط'].filter(Boolean);
+  return `<div class="grid c12">${needs ? `<div class="card s12 propose"><div class="flex wrap" style="gap:14px"><span class="ic">${ic('sparkle')}</span><div class="grow"><b>ما عندكش ${miss.join(' ولا ')}؟</b><p class="muted sm">الذكاء الاصطناعي يقترح عليك ${miss.join(' و')} تناسب براندك وجمهورك وتميّزك عن المنافسين. أنت من يقرر.</p></div>
+    ${colors.length < 2 ? `<button class="btn ghost" id="idpal" data-busy="يقترح…">${ic('sparkle')}اقترح ألواناً</button>` : ''}${!b.visual?.fonts?.heading ? `<button class="btn ghost" id="idfont2" data-busy="يقترح…">${ic('sparkle')}اقترح خطوطاً</button>` : ''}${!b.logo ? `<button class="btn primary" id="idlogo">${ic('studio')}صمّم شعاراً</button>` : ''}</div></div>` : ''}${guideCard(b)}
     <div class="card s6"><div class="card-h"><h3>الشعار</h3>${b.logo ? `<div class="end">${chip('مرفوع', 'em')}</div>` : ''}</div>
       ${b.logo?.url ? `<div class="inset" style="display:grid;place-items:center;height:180px"><img src="${esc(b.logo.url)}" alt="logo" style="max-width:70%;max-height:150px;object-fit:contain"></div>` : ''}
       <label class="drop mt12" id="drop" style="display:block">${ic('upload')}<div class="mt8"><b>${b.logo ? 'تغيير الشعار' : 'ارفع الشعار'}</b></div><div class="xs">PNG بخلفية شفافة أفضل · حتى 3MB</div><input type="file" id="logoIn" accept="image/png,image/jpeg,image/webp,image/svg+xml" hidden></label>
@@ -556,9 +620,12 @@ function brainVisual() {
           ${colors.length < 8 ? `<label class="swatch" style="display:grid;place-items:center;border-style:dashed" title="إضافة لون">${ic('plus')}<input type="color" id="addc" value="#5A3FFB" style="position:absolute;opacity:0;inset:0;cursor:pointer"></label>` : ''}</div>
         <p class="hint mt12">${colors.length ? colors.map((c) => `<span class="ltr mono">${c}</span>`).join(' · ') : 'أضف لونين على الأقل. التحليل الذكي يقترح ألواناً من موقعك.'}</p>
       </div>
-      <div class="card"><div class="card-h"><h3>خط البراند</h3><div class="end">${chip('Thmanyah Sans', '', false)}</div></div>
-        <div style="font-size:40px;font-weight:700;line-height:1.15">أبجد هوز Aa 123</div>
-        <div class="flex wrap mt12" style="gap:14px">${[[300, 'Light'], [400, 'Regular'], [500, 'Medium'], [700, 'Bold'], [900, 'Black']].map(([w, n]) => `<span style="font-weight:${w};font-size:18px">ثمانية <small class="muted xs" style="font-weight:400">${n}</small></span>`).join('')}</div>
+      <div class="card"><div class="card-h"><h3>خطوط البراند</h3><div class="end"><button class="btn ${b.visual?.fonts?.heading ? 'grey' : 'primary'} sm" id="idfont" data-busy="يقترح…">${ic('sparkle')}${b.visual?.fonts?.heading ? 'اقترح غيرها' : 'اقترح خطوطاً'}</button></div></div>
+        ${b.visual?.fonts?.heading ? (loadGFonts([b.visual.fonts.heading, b.visual.fonts.body, b.visual.fonts.latin]), `<div style="font-family:'${esc(b.visual.fonts.heading)}';font-size:34px;font-weight:700;line-height:1.2">${esc(b.name)}</div>
+          <p style="font-family:'${esc(b.visual.fonts.body)}';font-size:16px" class="mt8">نص تجريبي يوضح كيف يبدو المحتوى المكتوب بخط البراند على الشاشة.</p>
+          ${b.visual.fonts.latin ? `<p class="ltr" style="font-family:'${esc(b.visual.fonts.latin)}';font-size:16px;text-align:left">The quick brown fox · 0123456789</p>` : ''}
+          <div class="flex wrap mt8">${chip(`العناوين: ${b.visual.fonts.heading}`, 'vi', false)}${chip(`النصوص: ${b.visual.fonts.body}`, '', false)}${b.visual.fonts.latin ? chip(`لاتيني: ${b.visual.fonts.latin}`, '', false) : ''}</div>`)
+        : `<p class="muted sm">ما عندكش خط محدد؟ الذكاء الاصطناعي يقترح 3 توليفات (خط للعناوين + خط للنصوص + خط لاتيني) تناسب شخصية براندك وألوانه وشعاره، كلها خطوط Google مجانية للاستعمال التجاري.</p>`}
       </div>
     </div></div>`;
 }
@@ -622,10 +689,19 @@ function bindBrain(v) {
     try { await patchBrand({ fields: { [k]: { value: b.fields[k].value, source: 'confirmed' } } }); toast('تم التأكيد'); } catch (e) { toast(e.message, true); }
   }));
   // products
+  let newPhoto = null;
+  $('#pph', v) && ($('#pph', v).onchange = async (e) => { try { newPhoto = await readImage(e.target.files[0]); $('#pphl', v).innerHTML = `<img src="${newPhoto}" alt="" style="max-height:90px;border-radius:10px">`; } catch (err) { toast(err.message, true); } });
+  $$('[data-ep]', v).forEach((x) => (x.onclick = () => productModal(b.products.find((p) => p.id === x.dataset.ep))));
   $('#padd', v) && ($('#padd').onclick = (e) => busy(e.currentTarget, async () => {
     const name = $('#pn').value.trim();
+    if (!newPhoto) return toast('صورة المنتج إلزامية: ارفعها أولاً', true);
     if (!name) return toast('اكتب اسم المنتج', true);
-    try { await patchBrand({ products: [...b.products, { name, price: $('#pp').value, description: $('#pd').value, source: 'confirmed' }] }); toast('تمت الإضافة'); } catch (err) { toast(err.message, true); }
+    try {
+      const id = Math.random().toString(16).slice(2, 10);
+      await patchBrand({ products: [...b.products, { id, name, price: $('#pp').value, description: $('#pd').value, source: 'confirmed' }] });
+      S.brand = await api(`/api/brands/${b.id}/products/${id}/photo`, { method: 'POST', body: { dataUrl: newPhoto } });
+      renderShell(); go('brain', { replace: true }); toast('تمت الإضافة');
+    } catch (err) { toast(err.message, true); }
   }));
   $$('[data-delp]', v).forEach((x) => (x.onclick = () => busy(x, async () => {
     try { await patchBrand({ products: b.products.filter((p) => p.id !== x.dataset.delp) }); } catch (err) { toast(err.message, true); }
@@ -661,6 +737,8 @@ function bindBrain(v) {
   // identity proposals (palette / logo)
   $('#idpal', v) && ($('#idpal').onclick = (e) => busy(e.currentTarget, () => paletteModal()));
   $('#idlogo', v) && ($('#idlogo').onclick = () => logoModal());
+  $('#idfont', v) && ($('#idfont').onclick = (e) => busy(e.currentTarget, () => fontModal()));
+  $('#idfont2', v) && ($('#idfont2').onclick = (e) => busy(e.currentTarget, () => fontModal()));
   // visual identity guide
   const sendGuide = (body) => api(`/api/brands/${b.id}/guide`, { method: 'POST', body }).then((nb) => { S.brand = nb; toast('تم تحليل الدليل وتطبيقه'); PAGES.brain(); }).catch((e) => toast(e.message, true));
   const gfile = $('#gfile', v);
@@ -838,10 +916,31 @@ PAGES.voice = async () => {
   } catch (e) { toast(e.message, true); S.voices = S.voices || []; S.audio = S.audio || []; }
   if (S.page === 'voice' && S.brand?.id === id) drawVoice({ pool: k.summary });
 };
+// ElevenLabs voice labels come in English: show them in Arabic.
+const VTR = {
+  male: 'رجل', female: 'امرأة', neutral: 'محايد', young: 'شاب', middle_aged: 'متوسط العمر', 'middle aged': 'متوسط العمر', old: 'كبير السن',
+  professional: 'احترافي', premade: 'جاهز', cloned: 'مستنسخ', generated: 'مُولَّد', high_quality: 'جودة عالية',
+  advertisement: 'إعلانات', informative_educational: 'تعليمي وشرح', social_media: 'سوشال ميديا وريلز', narrative_story: 'سرد قصص', conversational: 'محادثة طبيعية', characters_animation: 'شخصيات ورسوم', news: 'أخبار', entertainment_tv: 'ترفيه وتلفزيون', meditation: 'هدوء وتأمل', narration: 'تعليق صوتي', audiobook: 'كتب صوتية', documentary: 'وثائقي', commercial: 'تجاري', asmr: 'ASMR',
+  ar: 'عربي', en: 'إنجليزي', fr: 'فرنسي', es: 'إسباني', arabic: 'عربي', english: 'إنجليزي', french: 'فرنسي',
+  saudi: 'سعودي', gulf: 'خليجي', emirati: 'إماراتي', kuwaiti: 'كويتي', egyptian: 'مصري', moroccan: 'مغربي', levantine: 'شامي', 'modern standard': 'فصحى', msa: 'فصحى', american: 'أمريكي', british: 'بريطاني', australian: 'أسترالي', standard: 'قياسي',
+  rich: 'غني', sophisticated: 'راقٍ', warm: 'دافئ', deep: 'عميق', calm: 'هادئ', upbeat: 'حيوي', energetic: 'حماسي', confident: 'واثق', friendly: 'ودود', soft: 'ناعم', clear: 'واضح', modern: 'عصري', smooth: 'سلس', authoritative: 'رسمي واثق', casual: 'عفوي', expressive: 'معبّر', gentle: 'لطيف', bright: 'مشرق', serious: 'جاد', playful: 'مرح', mature: 'ناضج', trustworthy: 'موثوق', engaging: 'جذاب', natural: 'طبيعي', crisp: 'نقي', strong: 'قوي', reels: 'ريلز', voice: 'صوت', commercial_: 'تجاري', documentary_: 'وثائقي',
+};
+const vtr = (w) => { const k = String(w || '').trim().toLowerCase(); return VTR[k] || VTR[k.replace(/\s+/g, '_')] || w; };
+const vtrPhrase = (p) => String(p || '').split(/(\s*[&,/]\s*|\s+)/).map((x) => (/^\s*[&,/]?\s*$/.test(x) ? x.replace('&', 'و') : vtr(x))).join('');
+function voiceName(x) { const [n, d] = String(x.name).split(/\s+-\s+/); return { name: n, desc: d ? vtrPhrase(d) : '' }; }
+function voiceTags(x) {
+  const L = x.labels || {};
+  const tags = [L.gender, L.age, L.accent, L.use_case || L['use case'], L.language, x.category].filter(Boolean).map(vtr);
+  if (L.description && !/\s/.test(L.description.trim())) tags.push(vtr(L.description));
+  else if (L.description) tags.push(vtrPhrase(L.description));
+  return [...new Set(tags)].slice(0, 5);
+}
 function drawVoice({ loading = false, pool } = {}) {
   const t = S.tts;
   const q = S.voiceQuery.trim().toLowerCase();
-  const voices = (S.voices || []).filter((x) => !q || (x.name + ' ' + Object.values(x.labels || {}).join(' ')).toLowerCase().includes(q));
+  const isAr = (x) => /^(ar|arabic)$/i.test(x.labels?.language || '') || /arab|saudi|gulf|egypt|morocc|emirat|عرب/i.test(Object.values(x.labels || {}).join(' ') + x.name);
+  const voices = (S.voices || []).filter((x) => !q || (x.name + ' ' + Object.values(x.labels || {}).join(' ') + ' ' + voiceTags(x).join(' ')).toLowerCase().includes(q))
+    .sort((a, b2) => (S.vrec?.[a.id]?.rank || 9) - (S.vrec?.[b2.id]?.rank || 9) || Number(isAr(b2)) - Number(isAr(a)));
   if (S.voices && !S.voices.some((x) => x.id === S.voiceId)) S.voiceId = S.voices[0]?.id || '';
   const model = S.models.find((m) => m.id === t.modelId) || S.models[0];
   const slider = (key, label, min, max, step, val, fmtv) => `<div><div class="flex"><span class="sm sec grow">${label}</span><b class="xs tnum" id="sv-${key}">${fmtv(val)}</b></div><input type="range" data-sl="${key}" min="${min}" max="${max}" step="${step}" value="${val}"></div>`;
@@ -858,11 +957,11 @@ function drawVoice({ loading = false, pool } = {}) {
           ${slider('speed', 'السرعة', 0.7, 1.2, 0.05, t.speed, (x) => Number(x).toFixed(2) + '×')}
         </div></div>
       </div>
-      <div class="flex mt16"><span class="lbl grow" style="margin:0">الصوت</span><div class="search ${S.voiceQuery ? 'open' : ''}" id="vs"><button aria-label="بحث">${ic('search')}</button><input placeholder="ابحث في الأصوات" value="${esc(S.voiceQuery)}"></div></div>
+      <div class="flex mt16"><span class="lbl grow" style="margin:0">الصوت</span><button class="btn ghost sm" id="vrec" data-busy="يختار…">${ic('sparkle')}اقترح لي الأنسب</button><div class="search ${S.voiceQuery ? 'open' : ''}" id="vs"><button aria-label="بحث">${ic('search')}</button><input placeholder="ابحث في الأصوات" value="${esc(S.voiceQuery)}"></div></div>
       <div class="voice-list mt8" id="vl">${loading ? '<div class="skel" style="height:46px"></div><div class="skel" style="height:46px"></div><div class="skel" style="height:46px"></div>' :
         voices.length ? voices.map((x) => `<div class="voice ${x.id === S.voiceId ? 'on' : ''}" data-v="${x.id}" tabindex="0">
           ${x.preview ? `<button class="play" data-pv="${x.id}" aria-label="استماع">${ic('play')}</button>` : '<span class="play" style="opacity:.3">' + ic('play') + '</span>'}
-          <div class="grow"><b class="sm">${esc(x.name)}</b><div class="muted xs">${esc([x.category, ...Object.values(x.labels || {})].filter(Boolean).slice(0, 4).join(' · '))}</div></div>
+          <div class="grow"><b class="sm">${esc(voiceName(x).name)}</b>${voiceName(x).desc ? ` <span class="xs sec">· ${esc(voiceName(x).desc)}</span>` : ''}${S.vrec?.[x.id] ? ` ${chip(`مقترح #${S.vrec[x.id].rank}`, 'em', false)}` : ''}<div class="muted xs">${esc(voiceTags(x).join(' · '))}</div>${S.vrec?.[x.id] ? `<div class="xs mt8" style="color:var(--accent)">${esc(S.vrec[x.id].why)}${S.vrec[x.id].settings ? ` · ${esc(S.vrec[x.id].settings)}` : ''}</div>` : ''}</div>
           ${x.id === S.voiceId ? ic('check') : ''}</div>`).join('') : '<p class="muted sm" style="padding:12px">لا توجد أصوات مطابقة</p>'}</div>
       <div class="flex mt16" style="justify-content:flex-end"><span class="muted xs grow" id="vcost">${t.text.length ? `سيستهلك حوالي ${fmt(t.text.length)} حرف من رصيد المفاتيح` : ''}</span><button class="btn primary" id="vgo" data-busy="يولّد…" ${loading ? 'disabled' : ''}>${ic('voice')}توليد الصوت</button></div>
     </div>
@@ -877,6 +976,14 @@ function drawVoice({ loading = false, pool } = {}) {
   const ta = $('#vt', v);
   ta.oninput = () => { t.text = ta.value; $('#vc').textContent = `${ta.value.length}/5000`; $('#vcost').textContent = ta.value.length ? `سيستهلك حوالي ${fmt(ta.value.length)} حرف من رصيد المفاتيح` : ''; };
   $$('[data-sl]', v).forEach((r) => (r.oninput = () => { const k = r.dataset.sl; t[k] = Number(r.value); $(`#sv-${k}`).textContent = k === 'speed' ? Number(r.value).toFixed(2) + '×' : Math.round(r.value * 100) + '%'; }));
+  $('#vrec', v).onclick = (e) => busy(e.currentTarget, async () => {
+    try {
+      const r = await api(`/api/brands/${S.brand.id}/voices/recommend`, { method: 'POST', body: { text: t.text } });
+      S.vrec = Object.fromEntries(r.picks.map((p, i) => [p.id, { ...p, rank: i + 1 }]));
+      if (r.picks[0]) { S.voiceId = r.picks[0].id; store.set('mos-voice', S.voiceId); }
+      drawVoice({ pool }); toast(r.picks.length ? 'اخترت لك أنسب 3 أصوات، الأول محدد الآن' : 'لم أجد صوتاً مناسباً', !r.picks.length);
+    } catch (err) { toast(err.message, true); }
+  });
   $('#vm', v).onclick = (e) => openMenu(e.currentTarget, S.models.map((m) => ({ label: m.name, desc: m.note, selected: m.id === t.modelId, onClick: () => { t.modelId = m.id; drawVoice({ pool }); } })));
   const sb = $('#vs', v); const si = $('input', sb);
   $('button', sb).onclick = () => { sb.classList.toggle('open'); if (sb.classList.contains('open')) si.focus(); };
@@ -1013,7 +1120,7 @@ function bindPicker(root, onChange) {
 }
 
 // ---------- providers (BYOK) ----------
-const KIND = { text: 'كتابة وتحليل', image: 'صور', video: 'فيديو', search: 'بحث الإنترنت' };
+const KIND = { text: 'كتابة وتحليل', image: 'صور', video: 'فيديو', search: 'بحث الإنترنت', social: 'النشر على المنصات' };
 const PST = { active: ['يعمل', 'em'], saved: ['محفوظ', 'sk'], invalid: ['مرفوض', 'ro'], error: ['خطأ مؤقت', 'am'] };
 async function loadProviders() {
   const [p, g] = await Promise.all([api('/api/providers'), api('/api/google').catch(() => null)]);
@@ -1087,10 +1194,11 @@ function googleCard(g) {
     <div class="flex wrap">${chip('ملفات البحث', '', false)}${chip('موافقات', '', false)}</div>
     <p class="muted xs mt12">${g.connected ? `<span class="ltr">${esc(g.email)}</span> · ${rel(g.connectedAt)}` : 'ملف لكل منافس + ملف رئيسي للبراند داخل Google Drive الخاص بك.'}</p>
     ${g.error ? `<p class="xs mt8" style="color:var(--t-ro)">${esc(g.error)}</p>` : ''}
+    ${!g.configured ? '<p class="xs mt8 muted">يحتاج إعداداً واحداً من مسؤول المنصة، بعدها يكفي زر واحد لكل مستخدم.</p>' : ''}
     <div class="flex mt16">${g.connected
-      ? `<button class="btn grey sm" data-gcon>${ic('refresh')}إعادة الربط</button><button class="btn ghost sm" data-gset>الإعدادات</button><span class="grow"></span><button class="btn grey icon sm" data-goff aria-label="فصل">${ic('trash')}</button>`
-      : g.configured ? `<button class="btn primary sm" data-gcon>${ic('plug')}ربط حساب Google</button><button class="btn ghost sm" data-gset>الإعدادات</button>`
-      : `<button class="btn primary sm" data-gset>${ic('plug')}إعداد Google</button>`}</div></div>`;
+      ? `<button class="btn grey sm" data-gcon>${ic('refresh')}إعادة الربط</button>${g.managed ? '' : `<button class="btn ghost sm" data-gset>للمسؤول</button>`}<span class="grow"></span><button class="btn grey icon sm" data-goff aria-label="فصل">${ic('trash')}</button>`
+      : g.configured ? `<button class="btn primary sm" data-gcon>${ic('plug')}ربط حساب Google</button>${g.managed ? '' : `<button class="btn ghost sm" data-gset>للمسؤول</button>`}`
+      : `<button class="btn ghost sm" data-gset>${ic('settings')}إعداد (للمسؤول)</button>`}</div></div>`;
 }
 async function googleConnect() {
   try { const r = await api('/api/google/connect', { method: 'POST', body: {} }); location.href = r.url; } catch (err) { toast(err.message, true); }
@@ -1112,7 +1220,7 @@ function googleModal() {
     ['<a class="src" href="https://console.cloud.google.com/auth/clients" target="_blank" rel="noopener">Clients ↗</a> ← Create client ← Web application. في Authorized redirect URIs الصق هذا الرابط:', g.redirectUri],
     ['انسخ Client ID و Client Secret والصقهما هنا، ثم اضغط «حفظ والربط».', ''],
   ];
-  modal(`<h2>ربط Google Sheets</h2><p class="muted sm mt8">تستعمل حساب Google الخاص بك. المنصة ترى وتعدّل <b>فقط</b> الملفات التي تنشئها هي، ولا تصل لباقي ملفاتك.</p>
+  modal(`<h2>إعداد Google (مرة واحدة · للمسؤول)</h2><p class="muted sm mt8">هذا الإعداد تقني ويقوم به صاحب المنصة مرة واحدة فقط. الأفضل: ضع القيمتين في Vercel كـ <span class="ltr mono">GOOGLE_CLIENT_ID</span> و <span class="ltr mono">GOOGLE_CLIENT_SECRET</span>، فيرى كل المستخدمين زر «ربط حساب Google» فقط. المنصة ترى وتعدّل <b>فقط</b> الملفات التي تنشئها هي.</p>
     <div class="rows mt12">${steps.map(([t, code], i) => `<div class="row-i" style="align-items:flex-start"><span class="ic" style="width:26px;height:26px;border-radius:8px;font-size:12px;flex:none">${i + 1}</span><div class="t"><small style="color:var(--text);white-space:normal">${t}</small>${code ? `<div class="flex mt8"><input class="field mono ltr sm" readonly value="${esc(code)}" style="text-align:left" id="gru"><button class="btn grey sm" id="gcp">نسخ</button></div>` : ''}</div></div>`).join('')}</div>
     <label class="lbl">Client ID</label><input class="field mono ltr" id="gid" placeholder="…apps.googleusercontent.com" style="text-align:left" value="">
     <label class="lbl">Client Secret</label><input class="field mono ltr" id="gsec" type="password" autocomplete="off" style="text-align:left" placeholder="${g.configured ? 'محفوظ · اكتب قيمة جديدة لتغييره' : 'GOCSPX-…'}">
@@ -1230,8 +1338,8 @@ async function drawCreate() {
   if (f.productId && !b.products.some((p) => p.id === f.productId)) f.productId = '';
   const prod = b.products.find((p) => p.id === f.productId);
   await loadModels('text').catch(() => null);
-  let occ = [];
-  try { occ = (await api(`/api/brands/${b.id}/occasions`)).occasions; } catch { /* optional */ }
+  let occ = []; let occMarket = '';
+  try { const r = await api(`/api/brands/${b.id}/occasions`); occ = r.occasions; occMarket = r.market; } catch { /* optional */ }
   if (!S.batches) { try { S.batches = (await api(`/api/brands/${b.id}/batches`)).batches; } catch { S.batches = []; } }
   const v = view(`<div class="grid c12">
     <div class="card s8"><div class="card-h"><h3>ماذا نكتب اليوم؟</h3><div class="end">${pickerHTML('text')}</div></div>
@@ -1246,7 +1354,7 @@ async function drawCreate() {
       </div>
       <span class="lbl">الفكرة أو ملاحظاتك (اختياري)</span>
       <textarea class="field" id="cidea" data-mic rows="3" maxlength="1500" placeholder="مثلاً: عرض خاص 20% بمناسبة العودة للمدارس، ركّز على الجودة والتوصيل السريع…">${esc(f.idea)}</textarea>
-      ${occ.length ? `<span class="lbl">مناسبات هذا الشهر</span><div class="opts" id="cocc">${occ.map((x) => `<button class="opt ${f.occasion === x.name ? 'on' : ''}" data-o="${esc(x.name)}">${esc(x.name)} <span class="muted xs ltr">${x.date.slice(5)}</span></button>`).join('')}</div>` : ''}
+      ${occ.length ? `<span class="lbl">مناسبات هذا الشهر <span class="muted xs" style="font-weight:400">· ${occMarket ? `حسب سوقك: ${esc(occMarket)}` : 'حدّد السوق في عقل البراند لتظهر مناسبات بلدك'}</span></span><div class="opts" id="cocc">${occ.map((x) => `<button class="opt ${f.occasion === x.name ? 'on' : ''}" data-o="${esc(x.name)}">${esc(x.name)} <span class="muted xs ltr">${x.date.slice(5)}</span></button>`).join('')}</div>` : ''}
       <div class="flex mt16"><span class="sm sec">${f.types.length > 1 ? 'العدد لكل نوع' : 'العدد'}</span><div class="pills" data-pills="count">${[1, 3, 5, 7, 10].map((n) => `<button data-v="${n}" class="${n === f.count ? 'on' : ''}">${n}</button>`).join('')}</div><span class="grow"></span>
         <button class="btn primary" id="cgo" data-busy="يكتب… قد يستغرق دقيقة">${ic('sparkle')}توليد المحتوى</button></div>
     </div>
@@ -1325,7 +1433,7 @@ function drawBatch() {
         <button class="btn grey sm" data-a="edit">${ic('edit')}تعديل</button>
         <button class="btn grey sm" data-a="rewrite">${ic('refresh')}إعادة بملاحظة</button>
         <button class="btn grey sm" data-a="schedule">${ic('calendar')}جدولة</button>
-        <button class="btn grey sm" data-a="image" data-busy="يصمم…">${ic('studio')}${it.image ? 'صورة أخرى' : 'صمّم الصورة'}</button>
+        <button class="btn grey sm" data-a="image" data-job="img-${it.id}" data-busy="يصمم…">${ic('studio')}${it.image ? 'صورة أخرى' : 'صمّم الصورة'}</button>
         <span class="grow"></span>
         <button class="btn ${it.status === 'approved' ? 'ghost' : 'primary'} sm" data-a="approve">${ic('check')}${it.status === 'approved' ? 'إلغاء' : 'اعتماد'}</button>
       </div></div>`).join('')}</div>`);
@@ -1459,7 +1567,10 @@ function drawStudio() {
   const st = aiOf('image');
   const v = view(`${studioTabs()}<div class="grid c12">
     <div class="card s5"><div class="card-h"><h3>صورة جديدة</h3></div>
-      <span class="lbl" style="margin-top:0">${KIND_L.image}</span>${pickerHTML('image')}<div class="mt12"></div>
+      <span class="lbl" style="margin-top:0">${KIND_L.image}</span>${pickerHTML('image')}
+      <span class="lbl">المنتج في الصورة</span><div class="sel"><button class="sel-btn" id="iprod" data-menu><span class="lab">${(() => { const p = b.products.find((x) => x.id === g.productId); return p ? `${p.photo ? `<img src="${esc(p.photo)}" alt="" style="width:22px;height:22px;border-radius:6px;object-fit:cover;vertical-align:middle;margin-inline-end:6px">` : ''}${esc(p.name)}` : 'بدون منتج محدد'; })()}</span>${ic('chev')}</button></div>
+      ${(() => { const p = b.products.find((x) => x.id === g.productId); return p && !p.photo ? `<p class="xs mt8" style="color:var(--t-ro)">هذا المنتج بلا صورة. أضفها من عقل البراند ← المنتجات حتى يظهر المنتج الحقيقي.</p>` : p ? '<p class="hint mt8">صورة المنتج تُرسل كمرجع: سيظهر نفس المنتج بالضبط.</p>' : ''; })()}
+      <div class="mt12"></div>
       <textarea class="field" id="ip" data-mic rows="5" maxlength="2000" placeholder="صف الصورة: المنتج، المكان، الأشخاص، الإضاءة، الإحساس… مثلاً: زجاجة زيت أرغان على طاولة خشبية في رياض مغربي، ضوء صباحي دافئ">${esc(g.prompt)}</textarea>
       <span class="lbl">المقاس</span>${pills('aspect', [['1:1', '1:1'], ['4:5', '4:5'], ['9:16', '9:16'], ['16:9', '16:9']], g.aspect)}
       <span class="lbl">الأسلوب</span><div class="opts" data-opts="style">${Object.entries(STYLE_L).map(([k, l]) => `<button class="opt ${g.style === k ? 'on' : ''}" data-k="${k}">${l}</button>`).join('')}</div>
@@ -1488,6 +1599,7 @@ function drawStudio() {
   $('#itx', v).oninput = (e) => (g.text = e.target.value);
   $('#icol', v).onchange = (e) => (g.useColors = e.target.checked);
   $('#ilogo', v).onchange = (e) => (g.useLogo = e.target.checked);
+  $('#iprod', v).onclick = () => openMenu($('#iprod', v), [{ label: 'بدون منتج محدد', selected: !g.productId, onClick: () => { g.productId = ''; drawStudio(); } }, ...b.products.map((p) => ({ label: p.name, desc: p.photo ? (p.price || 'صورة المنتج جاهزة') : 'ينقصه صورة', selected: g.productId === p.id, onClick: () => { g.productId = p.id; drawStudio(); } }))]);
   $('#igo', v).onclick = (e) => busy(e.currentTarget, async () => {
     if (!g.prompt.trim()) return toast('اكتب وصف الصورة', true);
     try { const img = await api(`/api/brands/${b.id}/images`, { method: 'POST', body: { ...g, ai: aiOf('image') } }); S.images = [img, ...S.images]; S.ov = null; drawStudio(); toast(`تم · ${img.model} · ${(img.ms / 1000).toFixed(1)} ث`); fallbackNote(img); } catch (err) { toast(err.message, true); }
@@ -1724,7 +1836,37 @@ function assistantModal() {
 }
 
 // ---------- schedule (calendar) ----------
-const PLAT_L = { instagram: 'Instagram', facebook: 'Facebook', tiktok: 'TikTok', x: 'X', linkedin: 'LinkedIn', snapchat: 'Snapchat', youtube: 'YouTube', threads: 'Threads', whatsapp: 'WhatsApp' };
+const PLAT_L = { instagram: 'Instagram', facebook: 'Facebook', tiktok: 'TikTok', youtube: 'YouTube', x: 'X', linkedin: 'LinkedIn', pinterest: 'Pinterest', reddit: 'Reddit', threads: 'Threads', snapchat: 'Snapchat', bluesky: 'Bluesky', googlebusiness: 'Google Business', telegram: 'Telegram', whatsapp: 'WhatsApp' };
+const SST = { scheduled: ['مجدول (نشر يدوي)', 'vi'], queued: ['سيُنشر تلقائياً', 'sk'], published: ['نُشر', 'em'], manual: ['نشرتُه يدوياً', 'em'], failed: ['فشل النشر', 'ro'], draft: ['بانتظار الموافقة', 'am'], rejected: ['مرفوض', 'ro'] };
+const tz = () => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; } catch { return 'UTC'; } };
+async function socialState(force) {
+  if (!S.brand) return null;
+  if (!force && S.social && S.social.brand === S.brand.id) return S.social;
+  try { S.social = { ...(await api(`/api/brands/${S.brand.id}/social`)), brand: S.brand.id }; } catch { S.social = { configured: false, accounts: [], brand: S.brand.id }; }
+  return S.social;
+}
+async function socialConnect(platform) {
+  try { const r = await api(`/api/brands/${S.brand.id}/social/connect`, { method: 'POST', body: { platform } }); location.href = r.url; } catch (e) { toast(e.message, true); }
+}
+function accountsModal() {
+  const so = S.social || { accounts: [] };
+  const has = (p) => so.accounts.filter((a) => a.platform === p);
+  modal(`<h2>الحسابات المربوطة · ${esc(S.brand.name)}</h2>
+    <p class="muted sm mt8">اضغط «ربط» وسجّل الدخول في المنصة ووافق، ثم ترجع هنا تلقائياً. بعدها تنشر وتجدول من التقويم، وتظهر الإحصائيات في صفحة «الأداء والتعلّم».</p>
+    ${!so.configured ? `<div class="inset sm mt12">${ic('plug')} النشر التلقائي يحتاج مفتاح <b>Zernio</b> مرة واحدة (خدمة تربط كل المنصات). أضفه من صفحة المفاتيح والمزوّدون.<div class="flex mt8"><button class="btn primary sm" data-go="providers">${ic('plug')}أضف المفتاح</button></div></div>` : ''}
+    ${so.error ? `<p class="xs mt8" style="color:var(--t-ro)">${esc(so.error)}</p>` : ''}
+    <div class="rows mt12">${Object.entries(PLAT_L).map(([p, l]) => `<div class="row-i"><div class="t"><b>${l}</b><small>${p === 'whatsapp' ? 'لا يوفّر نشراً تلقائياً للحسابات: انسخ النص والملف من التقويم' : has(p).length ? has(p).map((a) => `<span class="ltr">@${esc(a.username || a.name)}</span>`).join('، ') : 'غير مربوط'}</small></div>
+      ${p === 'whatsapp' ? chip('يدوي', '', false) : has(p).length ? `${chip('مربوط', 'em')}<button class="btn grey icon sm" data-dis="${has(p)[0].id}" aria-label="فصل">${ic('trash')}</button>` : `<button class="btn ${so.configured ? 'primary' : 'grey'} sm" data-con="${p}" ${so.configured ? '' : 'disabled'}>${ic('plug')}ربط</button>`}</div>`).join('')}
+      <div class="row-i"><div class="t"><b>Quora</b><small>Quora لا يوفر أي طريقة رسمية للنشر من التطبيقات، لذلك النشر عليه يدوي (انسخ النص من التقويم).</small></div>${chip('يدوي', '', false)}</div>
+    </div>
+    <div class="foot"><button class="btn ghost" data-x>إغلاق</button></div>`, (m) => {
+    m.style.maxWidth = '640px';
+    $('[data-x]', m).onclick = closeModal;
+    $$('[data-go]', m).forEach((x) => (x.onclick = () => { closeModal(); go(x.dataset.go); }));
+    $$('[data-con]', m).forEach((x) => (x.onclick = () => busy(x, () => socialConnect(x.dataset.con))));
+    $$('[data-dis]', m).forEach((x) => (x.onclick = () => busy(x, async () => { try { S.social = { ...(await api(`/api/brands/${S.brand.id}/social/accounts/${x.dataset.dis}`, { method: 'DELETE' })), brand: S.brand.id }; accountsModal(); } catch (e) { toast(e.message, true); } })));
+  });
+}
 function mediaHTML(m, h = 160) {
   if (!m) return '';
   return m.type === 'video' ? `<video src="${esc(m.url)}" controls playsinline preload="metadata" style="width:100%;max-height:${h}px;background:#000;border-radius:10px"></video>`
@@ -1758,27 +1900,41 @@ function scheduleModal(pre = {}, existing = null) {
   });
 }
 function itemModal(x) {
-  modal(`<div class="flex"><h2 class="grow">${esc(x.title || 'منشور مجدول')}</h2>${x.status === 'published' ? chip('نُشر', 'em') : chip('مجدول', 'vi')}</div>
-    <p class="muted sm mt8"><span class="ltr">${esc(x.date)} · ${esc(x.time)}</span> · ${x.platforms.map((p) => PLAT_L[p]).join('، ')}</p>
+  const so = S.social || { accounts: [] };
+  const ready = x.platforms.filter((p) => so.accounts.some((a) => a.platform === p));
+  const st = SST[x.status] || SST.scheduled;
+  const pub = x.publish;
+  modal(`<div class="flex"><h2 class="grow">${esc(x.title || 'منشور مجدول')}</h2>${chip(st[0], st[1])}</div>
+    <p class="muted sm mt8"><span class="ltr">${esc(x.date)} · ${esc(x.time)}</span> · ${x.platforms.map((p) => PLAT_L[p] || p).join('، ')}</p>
     ${x.media ? `<div class="mt12">${mediaHTML(x.media, 360)}</div>` : ''}
     ${x.caption ? `<div class="inset mt12 sm" style="white-space:pre-wrap;max-height:220px;overflow:auto">${esc(x.caption)}</div>` : ''}
+    ${pub ? `<div class="inset mt12 sm"><b>النشر التلقائي</b> · ${esc(pub.status || '')} · ${rel(pub.at)}${(pub.links || []).length ? `<div class="flex wrap mt8" style="gap:8px">${pub.links.map((l) => l.url ? `<a class="src" href="${esc(l.url)}" target="_blank" rel="noopener">${PLAT_L[l.platform] || l.platform} ↗</a>` : `<span class="xs ${l.error ? '' : 'muted'}" style="${l.error ? 'color:var(--t-ro)' : ''}">${PLAT_L[l.platform] || l.platform}: ${esc(l.error || l.status || '')}</span>`).join('')}</div>` : ''}${(pub.skipped || []).length ? `<div class="xs muted mt8">لم يُرسل إلى (غير مربوط): ${pub.skipped.map((p) => PLAT_L[p] || p).join('، ')}</div>` : ''}</div>` : ''}
+    <div class="inset mt12 sm">${ready.length ? `${ic('check')} جاهز للنشر التلقائي على: <b>${ready.map((p) => PLAT_L[p]).join('، ')}</b>${ready.length < x.platforms.length ? ` · غير مربوط: ${x.platforms.filter((p) => !ready.includes(p)).map((p) => PLAT_L[p] || p).join('، ')}` : ''}` : `${ic('plug')} لا يوجد حساب مربوط لهذه المنصات. اربط حساباتك لتنشر تلقائياً، أو انسخ النص وحمّل الملف وانشر يدوياً.`}</div>
     <div class="foot" style="flex-wrap:wrap">
       ${x.caption ? `<button class="btn grey" id="icp">${ic('copy')}نسخ النص</button>` : ''}
       ${x.media ? `<a class="btn grey" href="${esc(x.media.url)}" download target="_blank" rel="noopener">${ic('download')}تحميل</a>` : ''}
-      <button class="btn grey" id="ied">${ic('edit')}تعديل</button><span class="grow"></span>
-      <button class="btn ${x.status === 'published' ? 'ghost' : 'primary'}" id="ipub">${ic('check')}${x.status === 'published' ? 'إرجاع لمجدول' : 'تم النشر'}</button></div>`, (m) => {
+      <button class="btn grey" id="ied">${ic('edit')}تعديل</button>${pub?.postId ? `<button class="btn grey" id="isy" data-busy="…">${ic('refresh')}تحديث الحالة</button>` : ''}<span class="grow"></span>
+      ${ready.length && !['published', 'queued'].includes(x.status) ? `<button class="btn grey" id="iq" data-busy="يرسل…">${ic('calendar')}انشر تلقائياً في موعده</button><button class="btn primary" id="inow" data-busy="ينشر…">${ic('arrow')}انشر الآن</button>`
+      : !ready.length ? `<button class="btn primary" id="iacc">${ic('plug')}اربط الحسابات</button>${x.status !== 'manual' ? `<button class="btn ghost" id="iman">${ic('check')}نشرتُه يدوياً</button>` : ''}` : ''}</div>`, (m) => {
     $('#icp', m) && ($('#icp').onclick = () => navigator.clipboard.writeText(x.caption).then(() => toast('تم النسخ')));
     $('#ied').onclick = () => scheduleModal({}, x);
-    $('#ipub').onclick = () => busy($('#ipub'), async () => { try { await api(`/api/brands/${S.brand.id}/schedule/${x.id}`, { method: 'PATCH', body: { status: x.status === 'published' ? 'scheduled' : 'published' } }); closeModal(); PAGES.calendar(); } catch (e) { toast(e.message, true); } });
+    $('#iacc', m) && ($('#iacc').onclick = () => accountsModal());
+    $('#iman', m) && ($('#iman').onclick = () => busy($('#iman'), async () => { try { await api(`/api/brands/${S.brand.id}/schedule/${x.id}`, { method: 'PATCH', body: { status: 'manual' } }); closeModal(); PAGES.calendar(); } catch (e) { toast(e.message, true); } }));
+    const send = (now) => async () => { try { const r = await api(`/api/brands/${S.brand.id}/schedule/${x.id}/publish`, { method: 'POST', body: { now, timezone: tz() } }); closeModal(); toast(now ? `أُرسل للنشر على ${r.publish.platforms.map((p) => PLAT_L[p]).join('، ')}` : `سيُنشر تلقائياً ${r.date} ${r.time}`); PAGES.calendar(); } catch (e) { toast(e.message, true); } };
+    $('#inow', m) && ($('#inow').onclick = () => busy($('#inow'), send(true)));
+    $('#iq', m) && ($('#iq').onclick = () => busy($('#iq'), send(false)));
+    $('#isy', m) && ($('#isy').onclick = () => busy($('#isy'), async () => { try { const r = await api(`/api/brands/${S.brand.id}/schedule/${x.id}/sync`, { method: 'POST', body: {} }); closeModal(); itemModal(r); PAGES.calendar(); } catch (e) { toast(e.message, true); } }));
   });
 }
 S.calMonth = new Date().toISOString().slice(0, 7);
 PAGES.calendar = async () => {
   if (needBrand()) return header();
-  header(`<button class="btn primary" id="cadd">${ic('plus')}جدولة جديدة</button>`);
+  header(`<button class="btn grey" id="cacc">${ic('plug')}الحسابات المربوطة</button><button class="btn primary" id="cadd">${ic('plus')}جدولة جديدة</button>`);
   $('#cadd').onclick = () => scheduleModal();
+  $('#cacc').onclick = () => accountsModal();
   const month = S.calMonth;
-  const { items } = await api(`/api/brands/${S.brand.id}/schedule?month=${month}`);
+  const [{ items }, so] = await Promise.all([api(`/api/brands/${S.brand.id}/schedule?month=${month}`), socialState(true)]);
+  if (S.page !== 'calendar') return;
   const [y, mo] = month.split('-').map(Number);
   const first = new Date(y, mo - 1, 1).getDay();
   const days = new Date(y, mo, 0).getDate();
@@ -1790,14 +1946,15 @@ PAGES.calendar = async () => {
   for (let d = 1; d <= days; d++) {
     const k = `${month}-${String(d).padStart(2, '0')}`;
     cells.push(`<div class="cd ${k === today ? 'today' : ''}" data-day="${k}"><div class="flex"><b class="xs tnum">${d}</b></div>
-      ${(by[k] || []).map((x) => `<button class="ci ${x.status === 'published' ? 'pub' : ''}" data-it="${x.id}" title="${esc(x.title || x.caption)}">${x.media?.type === 'video' ? ic('play') : x.media?.type === 'image' ? ic('studio') : ic('edit')}<span><b class="tnum">${esc(x.time)}</b> ${esc(x.title || x.caption.slice(0, 40) || x.platforms.map((p) => PLAT_L[p]).join('، '))}</span></button>`).join('')}</div>`);
+      ${(by[k] || []).map((x) => `<button class="ci ${['published', 'manual'].includes(x.status) ? 'pub' : x.status === 'queued' ? 'q' : x.status === 'failed' ? 'fail' : ''}" data-it="${x.id}" title="${esc(x.title || x.caption)}">${x.media?.type === 'video' ? ic('play') : x.media?.type === 'image' ? ic('studio') : ic('edit')}<span><b class="tnum">${esc(x.time)}</b> ${esc(x.title || x.caption.slice(0, 40) || x.platforms.map((p) => PLAT_L[p]).join('، '))}</span></button>`).join('')}</div>`);
   }
   while (cells.length % 7) cells.push('<div class="cd blank"></div>');
   const label = new Date(y, mo - 1, 1).toLocaleDateString('ar-MA', { month: 'long', year: 'numeric' });
-  const v = view(`<div class="inset sm mb16">${ic('calendar')} الجدولة الآن تنظّم وتذكّرك: كل منشور فيه النص والملف جاهزان للنسخ والتحميل. <b>النشر التلقائي</b> على إنستغرام وتيك توك وفيسبوك يحتاج ربط حساباتك، وهو الخطوة القادمة.</div>
+  const v = view(`<div class="card mb16"><div class="flex wrap" style="gap:10px"><span class="ic">${ic('plug')}</span><div class="grow"><b class="sm">${so.accounts.length ? `${so.accounts.length} حساب مربوط` : 'لا توجد حسابات مربوطة'}</b><div class="flex wrap mt8" style="gap:6px">${so.accounts.length ? so.accounts.map((a) => chip(`${PLAT_L[a.platform] || a.platform} · ${a.username || a.name}`, 'em', false)).join('') : '<span class="muted xs">اربط إنستغرام، تيك توك، فيسبوك، يوتيوب، X، لينكدإن، بنترست، ريديت، ثريدز، سناب شات… بضغطة لكل منصة، ثم انشر أو جدول من هنا.</span>'}</div></div><button class="btn ${so.accounts.length ? 'grey' : 'primary'} sm" id="cacc2">${ic('plug')}${so.accounts.length ? 'إدارة الحسابات' : 'اربط حساباتك'}</button></div></div>
     <div class="card"><div class="card-h"><button class="btn grey icon sm" id="cprev" aria-label="السابق">${ic('arrow', 'rtl-flip')}</button><h3 style="flex:1;text-align:center">${esc(label)}</h3><button class="btn grey icon sm" id="cnext" aria-label="التالي">${ic('arrow')}</button></div>
-      <div class="flex wrap mb16">${chip(`${items.filter((x) => x.status === 'scheduled').length} مجدول`, 'vi')}${chip(`${items.filter((x) => x.status === 'published').length} نُشر`, 'em')}<span class="muted xs">اضغط على يوم لإضافة جدولة فيه</span></div>
+      <div class="flex wrap mb16">${['scheduled', 'queued', 'published', 'manual', 'failed', 'draft'].map((k) => { const n = items.filter((x) => x.status === k).length; return n ? chip(`${n} ${SST[k][0]}`, SST[k][1]) : ''; }).join('')}<span class="muted xs">اضغط على يوم لإضافة جدولة فيه</span></div>
       <div class="cal">${['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'].map((x) => `<div class="cw">${x}</div>`).join('')}${cells.join('')}</div></div>`);
+  $('#cacc2', v).onclick = () => accountsModal();
   $('#cprev', v).onclick = () => { const d = new Date(y, mo - 2, 1); S.calMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; PAGES.calendar(); };
   $('#cnext', v).onclick = () => { const d = new Date(y, mo, 1); S.calMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; PAGES.calendar(); };
   $$('[data-it]', v).forEach((b) => (b.onclick = (e) => { e.stopPropagation(); itemModal(items.find((x) => x.id === b.dataset.it)); }));
@@ -1838,6 +1995,38 @@ function editModal(kind, src) {
 
 
 // ---------- identity proposals ----------
+const GF_LOADED = new Set();
+function loadGFonts(list) {
+  const need = list.filter((f) => f && !GF_LOADED.has(f));
+  if (!need.length) return;
+  need.forEach((f) => GF_LOADED.add(f));
+  const l = document.createElement('link');
+  l.rel = 'stylesheet';
+  l.href = `https://fonts.googleapis.com/css2?${need.map((f) => `family=${encodeURIComponent(f).replace(/%20/g, '+')}:wght@400;700`).join('&')}&display=swap`;
+  document.head.append(l);
+}
+async function fontModal() {
+  const b = S.brand;
+  let list;
+  try { list = (await api(`/api/brands/${b.id}/identity/fonts`, { method: 'POST', body: { ai: aiOf('text') } })).pairings; } catch (e) { return toast(e.message, true); }
+  if (!list.length) return toast('لم أحصل على اقتراحات صالحة، حاول مجدداً', true);
+  loadGFonts(list.flatMap((p) => [p.heading, p.body, p.latin]));
+  const c = (b.visual?.colors || [])[0] || 'var(--text)';
+  modal(`<h2>اقتراحات خطوط لـ ${esc(b.name)}</h2><p class="muted sm mt8">اختر توليفة لتطبيقها. كلها من Google Fonts (مجانية للاستعمال التجاري).</p>
+    ${list.map((p, i) => `<div class="inset mt12"><div class="flex"><b class="grow">${esc(p.name)}</b><button class="btn primary sm" data-fp="${i}">${ic('check')}طبّق</button></div>
+      <div class="mt8" style="font-family:'${esc(p.heading)}';font-size:30px;font-weight:700;line-height:1.25;color:${c}">${esc(b.name)} · عرض خاص اليوم</div>
+      <p style="font-family:'${esc(p.body)}';font-size:15px" class="mt8">هذا مثال لنص منشور بخط البراند: واضح، مريح للقراءة على الهاتف، ويعكس شخصية العلامة.</p>
+      <p class="ltr" style="font-family:'${esc(p.latin)}';font-size:15px;text-align:left">${esc(b.name)} — New collection, 2026</p>
+      <div class="flex wrap mt8">${chip(`العناوين: ${p.heading}`, 'vi', false)}${chip(`النصوص: ${p.body}`, '', false)}${chip(`لاتيني: ${p.latin}`, '', false)}</div>
+      <p class="xs sec mt8">${esc(p.why)}</p></div>`).join('')}
+    <div class="foot"><button class="btn ghost" data-x>إغلاق</button></div>`, (m) => {
+    m.style.maxWidth = '720px';
+    $('[data-x]', m).onclick = closeModal;
+    $$('[data-fp]', m).forEach((x) => (x.onclick = () => busy(x, async () => {
+      try { const p = list[Number(x.dataset.fp)]; S.brand = await api(`/api/brands/${b.id}/identity/use-fonts`, { method: 'POST', body: p }); closeModal(); renderShell(); go('brain', { replace: true }); toast('تم تطبيق الخطوط'); } catch (e) { toast(e.message, true); }
+    })));
+  });
+}
 async function paletteModal() {
   const b = S.brand;
   let list;
@@ -1879,35 +2068,71 @@ const FUNNEL = { awareness: 'الوعي', consideration: 'الاهتمام', con
 const RS = [['dna', 'Brand DNA'], ['archetype', 'Archetype'], ['positioning', 'التموضع'], ['personality', 'الشخصية'], ['tone', 'نبرة التواصل'], ['audience', 'الجمهور المستهدف'], ['strategy', 'الاستراتيجية التسويقية'], ['social', 'السوشال ميديا'], ['ads', 'الإعلانات'], ['campaigns', 'الحملات'], ['funnel', 'قمع التسويق']];
 const RL = [['pillars', 'محاور المحتوى'], ['offers', 'العروض'], ['hooks', 'الخطافات'], ['ctas', 'الدعوات للإجراء'], ['strengths', 'نقاط القوة'], ['weaknesses', 'نقاط الضعف']];
 const claim = (x) => x ? `${esc(x.value)} ${chip(BASIS[x.basis]?.[0] || '', BASIS[x.basis]?.[1] || '', false)}${x.source && /^https?:/.test(x.source) ? ` <a class="xs src" href="${esc(x.source)}" target="_blank" rel="noopener">المصدر ↗</a>` : ''}` : '<span class="muted">—</span>';
+const CHL = { website: 'الموقع', instagram: 'إنستغرام', tiktok: 'تيك توك', facebook: 'فيسبوك', youtube: 'يوتيوب', x: 'X', linkedin: 'لينكدإن', snapchat: 'سناب شات', pinterest: 'بنترست', threads: 'ثريدز', whatsapp: 'واتساب', google_maps: 'خرائط Google', marketplace: 'متاجر' };
+const chUrl = (k, v) => {
+  v = String(v || '').trim();
+  if (/^https?:\/\//.test(v)) return v;
+  const h = v.replace(/^@/, '');
+  return { instagram: `https://instagram.com/${h}`, tiktok: `https://www.tiktok.com/@${h}`, x: `https://x.com/${h}`, threads: `https://www.threads.net/@${h}`, snapchat: `https://www.snapchat.com/add/${h}`, youtube: `https://www.youtube.com/@${h}`, facebook: `https://facebook.com/${h}`, pinterest: `https://pinterest.com/${h}` }[k] || (/\./.test(v) ? `https://${v}` : '');
+};
+const chLinks = (c) => Object.entries(c.channels || { website: c.website, instagram: c.instagram }).filter(([, v]) => v).map(([k, v]) => { const u = chUrl(k, v); return u ? `<a class="src" href="${esc(u)}" target="_blank" rel="noopener">${CHL[k] || k} ↗</a>` : `<span class="muted">${CHL[k] || k}: ${esc(v)}</span>`; }).join('');
+const FMTS = [['xlsx', 'Excel', 'يفتح في Excel و Google Sheets و Numbers'], ['docx', 'Word', 'يفتح في Word و Google Docs'], ['pdf', 'PDF', 'صفحة جاهزة للطباعة أو الحفظ PDF'], ['csv', 'CSV', 'بيانات خام لأي برنامج'], ['md', 'Markdown', 'للصق في Notion أو أي محرر']];
+function downloadMenu(btn, q) {
+  openMenu(btn, FMTS.map(([f, l, d]) => ({ label: l, desc: d, onClick: () => { const u = `/api/brands/${S.brand.id}/research/export?${q}&format=${f}`; if (f === 'pdf') window.open(u, '_blank', 'noopener'); else { const a = document.createElement('a'); a.href = u; a.download = ''; document.body.append(a); a.click(); a.remove(); } } })));
+}
 PAGES.research = async () => {
   if (needBrand()) return header();
   const b = S.brand;
-  header(`<a class="btn ghost" href="/api/brands/${b.id}/research/export" download>${ic('download')}الملف الرئيسي (CSV)</a>`);
+  S.rtab = S.rtab || 'competitors';
+  header(pills('rtab', [['competitors', 'المنافسون'], ['compare', 'مقارنة مع براندي'], ['market', 'تحليل السوق والفرص'], ['files', 'التنزيل و Google Sheets']], S.rtab));
   const [R, G] = await Promise.all([api(`/api/brands/${b.id}/research`), api('/api/google').catch(() => ({ connected: false }))]);
+  if (S.page !== 'research') return;
   S.research = R;
   const SH = R.sheets || { competitors: {} };
   const done = R.competitors.filter((c) => c.status === 'researched');
   const X = R.cross;
-  const v = view(`
-  <div class="grid c12 mb16">
-    <div class="card s8"><div class="card-h"><span class="ic">${ic('search')}</span><h3>1 · اكتشاف المنافسين</h3>${R.discovery ? `<div class="end"><span class="muted xs">${R.discovery.web ? 'من الإنترنت' : 'بدون بحث'} · ${esc(R.discovery.via)} · ${rel(R.discovery.at)}</span></div>` : ''}</div>
-      <div class="grid c2" style="gap:12px"><div><label class="lbl" style="margin-top:0">السوق</label><input class="field" id="rmk" value="${esc(b.fields?.market?.value || '')}" placeholder="مثلاً: المغرب، الدار البيضاء"></div>
-        <div><label class="lbl" style="margin-top:0">منافسون تعرفهم (اختياري)</label><textarea class="field" id="rseed" data-mic rows="2" placeholder="اسم أو رابط في كل سطر"></textarea></div></div>
-      <div class="flex mt12" style="justify-content:flex-end"><button class="btn primary" id="rdisc" data-busy="يبحث في الإنترنت…">${ic('search')}ابحث عن المنافسين</button></div></div>
-    <div class="card s4 stat feature"><div class="flex"><span class="ic">${ic('research')}</span><span class="sec sm">المنافسون المحلَّلون</span></div><div class="num">${done.length}/${R.competitors.length}</div><span class="muted xs">${X ? `آخر تحليل مقارن ${rel(X.at)}` : 'حلّل المنافسين ثم شغّل التحليل المقارن'}</span></div>
-  </div>
-  <div class="card mb16"><div class="card-h"><span class="ic">${ic('brands')}</span><h3>2 · المنافسون</h3><div class="end">${R.competitors.some((c) => c.status !== 'researched') ? `<button class="btn ghost sm" id="rall" data-busy="يحلل…">${ic('sparkle')}حلّل الكل</button>` : ''}<button class="btn grey sm" id="radd">${ic('plus')}إضافة يدوية</button></div></div>
+  const CP = R.compare;
+  S.rsel = S.rsel || new Set(done.map((c) => c.id));
+  const tabNote = `<div class="grid c4 mb16">${[
+    ['competitors', 'research', 'المنافسون', `${done.length}/${R.competitors.length} محلَّل`],
+    ['compare', 'insights', 'مقارنة مع براندي', CP ? `آخر مقارنة ${rel(CP.at)}` : 'لم تُشغَّل بعد'],
+    ['market', 'sparkle', 'الفرص', X ? `${X.opportunities.length} فرصة · ${X.opportunities.filter((o) => o.status === 'approved').length} موافَق` : 'لم يُحلَّل بعد'],
+    ['files', 'download', 'الملفات', G.connected ? 'Google Sheets مربوط' : 'Excel · Word · PDF'],
+  ].map(([k, i, t, d]) => `<button class="card stat ${S.rtab === k ? 'feature' : ''}" data-rt="${k}" style="text-align:start;cursor:pointer;border:${S.rtab === k ? '0' : ''}"><div class="flex"><span class="ic">${ic(i)}</span><b class="sm">${t}</b></div><span class="muted xs mt8" style="display:block">${d}</span></button>`).join('')}</div>`;
+
+  let body = '';
+  if (S.rtab === 'competitors') body = `
+  <div class="card mb16"><div class="card-h"><span class="ic">${ic('search')}</span><h3>اكتشاف المنافسين</h3>${R.discovery ? `<div class="end"><span class="muted xs">${R.discovery.web ? 'من الإنترنت' : 'بدون بحث'} · ${esc(R.discovery.via)} · ${rel(R.discovery.at)}</span></div>` : ''}</div>
+    <div class="grid c2" style="gap:12px"><div><label class="lbl" style="margin-top:0">السوق</label><input class="field" id="rmk" value="${esc(b.fields?.market?.value || '')}" placeholder="مثلاً: الخليج، السعودية، الدار البيضاء"></div>
+      <div><label class="lbl" style="margin-top:0">منافسون تعرفهم (اختياري)</label><textarea class="field" id="rseed" data-mic rows="2" placeholder="اسم أو رابط في كل سطر"></textarea></div></div>
+    <p class="hint mt8">يبحث في كل القنوات: الموقع، إنستغرام، تيك توك، فيسبوك، يوتيوب، X، لينكدإن، سناب شات، بنترست، ثريدز، خرائط Google والتقييمات، والمتاجر.</p>
+    <div class="flex mt12" style="justify-content:flex-end"><button class="btn primary" id="rdisc" data-busy="يبحث في الإنترنت…">${ic('search')}ابحث عن المنافسين</button></div></div>
+  <div class="card"><div class="card-h"><span class="ic">${ic('brands')}</span><h3>المنافسون (${R.competitors.length})</h3><div class="end">${R.competitors.some((c) => c.status !== 'researched') ? `<button class="btn ghost sm" id="rall" data-busy="يحلل…">${ic('sparkle')}حلّل الكل</button>` : ''}<button class="btn grey sm" id="radd">${ic('plus')}إضافة يدوية</button></div></div>
     ${R.competitors.length ? `<div class="grid c3">${R.competitors.map((c) => `<div class="inset comp" data-c="${c.id}">
       <div class="flex"><b class="grow">${esc(c.name)}</b>${c.status === 'researched' ? chip('محلَّل', 'em') : chip('مكتشف', '')}${chip(c.kind === 'direct' ? 'مباشر' : 'غير مباشر', '', false)}</div>
       <p class="xs sec mt8">${esc(c.profile?.summary || c.why)}</p>
-      <div class="flex wrap mt8 xs">${c.website ? `<a class="src" href="${esc(/^https?:/.test(c.website) ? c.website : 'https://' + c.website)}" target="_blank" rel="noopener">الموقع ↗</a>` : ''}${c.instagram ? `<a class="src" href="${esc(/^https?:/.test(c.instagram) ? c.instagram : 'https://instagram.com/' + c.instagram.replace('@', ''))}" target="_blank" rel="noopener">إنستغرام ↗</a>` : ''}</div>
-      <div class="flex mt12">${c.status === 'researched' ? `<button class="btn primary sm" data-open="${c.id}">عرض التحليل</button><button class="btn grey sm" data-an="${c.id}" data-busy="يحلل…">${ic('refresh')}تحديث</button>` : `<button class="btn primary sm" data-an="${c.id}" data-busy="يحلل… حتى دقيقتين">${ic('sparkle')}حلّل</button>`}<span class="grow"></span>${SH.competitors?.[c.id] ? `<a class="btn ghost sm" href="${esc(SH.competitors[c.id].url)}" target="_blank" rel="noopener">Sheet ↗</a>` : ''}<button class="btn grey icon sm" data-rm="${c.id}" aria-label="حذف">${ic('trash')}</button></div></div>`).join('')}</div>`
+      <div class="flex wrap mt8 xs" style="gap:8px">${chLinks(c)}</div>
+      <div class="flex wrap mt12">${c.status === 'researched' ? `<button class="btn primary sm" data-open="${c.id}">عرض التحليل</button><button class="btn grey sm" data-dl="${c.id}">${ic('download')}تنزيل</button><button class="btn grey icon sm" data-an="${c.id}" data-job="an-${c.id}" data-busy="" title="تحديث التحليل" aria-label="تحديث">${ic('refresh')}</button>` : `<button class="btn primary sm" data-an="${c.id}" data-job="an-${c.id}" data-busy="يحلل… حتى دقيقتين">${ic('sparkle')}حلّل</button>`}<span class="grow"></span>${SH.competitors?.[c.id] ? `<a class="btn ghost sm" href="${esc(SH.competitors[c.id].url)}" target="_blank" rel="noopener">Sheet ↗</a>` : ''}<button class="btn grey icon sm" data-rm="${c.id}" aria-label="حذف">${ic('trash')}</button></div></div>`).join('')}</div>`
     : `<div class="empty" style="padding:24px"><span class="ic">${ic('search')}</span><h3>لا يوجد منافسون بعد</h3><p>اضغط "ابحث عن المنافسين"، أو أضفهم يدوياً، أو فعّل البحث داخل التحليل الذكي في عقل البراند.</p></div>`}
+  </div>`;
+
+  if (S.rtab === 'compare') body = `
+  <div class="card mb16"><div class="card-h"><span class="ic">${ic('insights')}</span><h3>${esc(b.name)} مقابل المنافسين</h3><div class="end">${CP ? `<span class="muted xs">${esc(CP.via)} · ${rel(CP.at)}</span><button class="btn grey sm" id="cpdl">${ic('download')}تنزيل</button>` : ''}</div></div>
+    ${done.length ? `<span class="lbl" style="margin-top:0">اختر المنافسين للمقارنة (حتى 5)</span><div class="opts" id="cpsel">${done.map((c) => `<button class="opt ${S.rsel.has(c.id) ? 'on' : ''}" data-cs="${c.id}">${esc(c.name)}</button>`).join('')}</div>
+      <div class="flex mt12" style="justify-content:flex-end"><button class="btn primary" id="cpgo" data-busy="يقارن… حتى دقيقة">${ic('sparkle')}${CP ? 'أعد المقارنة' : 'قارن الآن'}</button></div>`
+    : `<p class="muted sm">حلّل منافساً واحداً على الأقل من تبويب «المنافسون»، ثم ارجع هنا لترى براندك أمامهم بعداً بعداً.</p><div class="flex mt12"><button class="btn primary sm" data-rt="competitors">${ic('research')}المنافسون</button></div>`}
   </div>
-  <div class="card"><div class="card-h"><span class="ic">${ic('insights')}</span><h3>3 · التحليل المقارن والفرص</h3><div class="end">${X ? `<span class="muted xs">${esc(X.via)} · ${rel(X.at)}</span>` : ''}<button class="btn ${X ? 'grey' : 'primary'} sm" id="rcross" data-busy="يقارن… حتى دقيقتين" ${done.length ? '' : 'disabled'}>${ic('sparkle')}${X ? 'أعد التحليل' : 'حلّل السوق'}</button></div></div>
+  ${CP ? `<div class="card mb16"><p class="sm">${esc(CP.summary)}</p>
+    <div class="tablewrap mt12"><table class="cmp"><thead><tr><th>البعد</th><th style="background:var(--accent-soft)">${esc(b.name)}</th>${CP.names.map((n) => `<th>${esc(n)}</th>`).join('')}<th>المتفوّق</th><th>ما نفعله</th></tr></thead><tbody>
+      ${CP.rows.map((r) => `<tr><td><b>${esc(r.dimension)}</b></td><td style="background:var(--accent-soft)">${esc(r.brand)}</td>${r.competitors.map((x) => `<td class="sec">${esc(x)}</td>`).join('')}<td>${chip(r.leader, r.leader.trim().toLowerCase() === b.name.trim().toLowerCase() ? 'em' : 'am', false)}</td><td class="sm">${esc(r.action)}</td></tr>`).join('')}
+    </tbody></table></div></div>
+    <div class="grid c3">${[['priorities', 'أولويات 30 يوماً', 'vi'], ['edges', 'نتفوق فيه', 'em'], ['gaps', 'يتفوقون فيه', 'am']].map(([k, l, t]) => `<div class="card"><div class="card-h"><h3>${l}</h3><div class="end">${chip(String(CP[k].length), t, false)}</div></div><ul class="sm sec" style="padding-inline-start:18px">${CP[k].map((x) => `<li>${esc(x)}</li>`).join('') || '<li>—</li>'}</ul></div>`).join('')}</div>` : ''}`;
+
+  if (S.rtab === 'market') body = `
+  <div class="card"><div class="card-h"><span class="ic">${ic('insights')}</span><h3>تحليل السوق والفرص</h3><div class="end">${X ? `<span class="muted xs">${esc(X.via)} · ${rel(X.at)}</span><button class="btn grey sm" id="mkdl">${ic('download')}تنزيل</button>` : ''}<button class="btn ${X ? 'grey' : 'primary'} sm" id="rcross" data-busy="يقارن… حتى دقيقتين" ${done.length ? '' : 'disabled'}>${ic('sparkle')}${X ? 'أعد التحليل' : 'حلّل السوق'}</button></div></div>
     ${X ? `<p class="sm">${esc(X.summary)}</p>
       ${X.pillars.length ? `<span class="lbl">محاور المحتوى المقترحة لبراندك</span><div class="flex wrap">${X.pillars.map((p) => chip(p, 'vi', false)).join('')}</div>` : ''}
-      <span class="lbl">الفرص (${X.opportunities.length}) · وافق على ما يعجبك، ثم حوّله لمحتوى</span>
+      <span class="lbl">الفرص (${X.opportunities.length}) · وافق على ما يعجبك، ثم حوّله لمحتوى. الموافقات تظهر أيضاً في صفحة «الموافقات».</span>
       <div class="grid c2">${X.opportunities.map((o) => `<div class="inset opp ${o.status}"><div class="flex"><b class="grow">${esc(o.title)}</b>${chip(FUNNEL[o.funnel], 'vi', false)}${o.status === 'approved' ? chip('موافق عليها', 'em') : o.status === 'rejected' ? chip('مرفوضة', 'ro') : ''}</div>
         <p class="sm mt8">${esc(o.angle)}</p><p class="xs muted mt8">المصدر: ${esc(o.why)}${o.need ? ` · الحاجة: ${esc(o.need)}` : ''}${o.format ? ` · الصيغة: ${esc(o.format)}` : ''}</p>
         <div class="flex mt12"><button class="btn primary sm" data-use-op="${o.id}">${ic('create')}حوّل لمحتوى</button>${o.status !== 'approved' ? `<button class="btn grey sm" data-op="${o.id}" data-st="approved">${ic('check')}موافقة</button>` : ''}${o.status !== 'rejected' ? `<button class="btn grey icon sm" data-op="${o.id}" data-st="rejected" aria-label="رفض">${ic('x')}</button>` : ''}</div></div>`).join('')}</div>
@@ -1915,26 +2140,50 @@ PAGES.research = async () => {
       ${X.seasonal.length ? `<span class="lbl">مواسم ومناسبات</span><div class="grid c2">${X.seasonal.map((s2) => `<div class="inset sm"><b>${esc(s2.moment)}</b><div class="sec mt8">${esc(s2.idea)}</div></div>`).join('')}</div>` : ''}
       ${X.sources?.length ? `<details class="mt16"><summary class="sm">المصادر (${X.sources.length})</summary><ul class="xs" style="padding-inline-start:18px">${X.sources.map((s2) => `<li><a class="src" href="${esc(s2.url)}" target="_blank" rel="noopener">${esc(s2.title || s2.url)}</a></li>`).join('')}</ul></details>` : ''}`
     : `<p class="muted sm">بعد تحليل منافس واحد على الأقل، يقارن النظام بينهم ويستخرج نقاط القوة والضعف، المواضيع المستهلكة، الاحتياجات بلا جواب، والفرص المناسبة لهوية براندك مع مرحلة القمع.</p>`}
-  </div>
-  <div class="card mt16"><div class="card-h"><span class="ic">${ic('download')}</span><h3>4 · Google Sheets</h3><div class="end">${G.connected ? chip(esc(G.email || 'مربوط'), 'em', false) : chip('غير مربوط', '')}</div></div>
-    ${!G.connected ? `<p class="muted sm">اربط حساب Google مرة واحدة، فتنشئ المنصة ملفاً لكل منافس وملفاً رئيسياً لبراندك داخل Google Drive الخاص بك. تكتب ملاحظاتك في الشيت وتوافق أو ترفض الفرص من هناك.</p><div class="flex mt12"><button class="btn primary sm" data-go="providers">${ic('plug')}ربط حساب Google</button></div>`
+  </div>`;
+
+  if (S.rtab === 'files') body = `
+  <div class="card mb16"><div class="card-h"><span class="ic">${ic('download')}</span><h3>تنزيل التحليلات</h3><div class="end"><span class="muted xs">Excel · Word · PDF · CSV · Markdown</span></div></div>
+    <div class="rows">
+      <div class="row-i"><div class="t"><b>تحليل السوق الكامل</b><small>المنافسون، الفرص، قراءة السوق، المحاور، المصادر${CP ? '، والمقارنة مع براندك' : ''}</small></div><button class="btn primary sm" data-dlq="kind=market">${ic('download')}تنزيل</button></div>
+      ${CP ? `<div class="row-i"><div class="t"><b>${esc(b.name)} مقابل المنافسين</b><small>جدول المقارنة والأولويات</small></div><button class="btn grey sm" data-dlq="kind=compare">${ic('download')}تنزيل</button></div>` : ''}
+      ${done.map((c) => `<div class="row-i"><div class="t"><b>${esc(c.name)}</b><small>تحليل المنافس كاملاً مع القنوات والمصادر · ${rel(c.researchedAt)}</small></div><button class="btn grey sm" data-dlq="c=${c.id}">${ic('download')}تنزيل</button></div>`).join('')}
+    </div></div>
+  <div class="card"><div class="card-h"><span class="ic">${ic('download')}</span><h3>Google Sheets</h3><div class="end">${G.connected ? chip(esc(G.email || 'مربوط'), 'em', false) : chip('غير مربوط', '')}</div></div>
+    ${!G.connected ? `<p class="muted sm">اربط حساب Google بضغطة واحدة، فتنشئ المنصة ملفاً لكل منافس وملفاً رئيسياً لبراندك داخل Google Drive الخاص بك. تكتب ملاحظاتك في الشيت وتوافق أو ترفض الفرص من هناك.</p><div class="flex mt12">${G.configured ? `<button class="btn primary sm" id="gconr">${ic('plug')}ربط حساب Google</button>` : `<span class="muted xs">ربط Google غير مفعّل بعد في المنصة. يمكنك تنزيل الملفات بالأعلى بأي صيغة، وفتح ملف Excel مباشرة في Google Sheets.</span>`}</div>`
     : `<div class="grid c2">
       <div class="inset"><div class="flex"><b class="grow">الملف الرئيسي للبراند</b>${SH.master ? `<span class="muted xs">${rel(SH.master.at)}</span>` : ''}</div>
         <p class="xs sec mt8">مقارنة المنافسين · فرص السوق (مع خانة القرار) · الاتجاهات · أفكار المحتوى · القمع التسويقي · تقويم المحتوى · الموافقات</p>
         <div class="flex wrap mt12">${SH.master ? `<a class="btn primary sm" href="${esc(SH.master.url)}" target="_blank" rel="noopener">افتح الملف ↗</a><button class="btn grey sm" id="gmaster" data-busy="يحدّث…">${ic('refresh')}تحديث</button><button class="btn ghost sm" id="gpull" data-busy="يقرأ…">${ic('check')}اقرأ قراراتي من الشيت</button>` : `<button class="btn primary sm" id="gmaster" data-busy="ينشئ الملف…">${ic('plus')}أنشئ الملف الرئيسي</button>`}</div></div>
       <div class="inset"><div class="flex"><b class="grow">ملف لكل منافس</b><span class="muted xs">${Object.keys(SH.competitors || {}).length}/${done.length}</span></div>
         <p class="xs sec mt8">الهوية · التموضع · السوشال ميديا · الحملات · الإعلانات · استراتيجية المحتوى · القمع · الفرص · المصادر. ملاحظاتك في العمود الأخير تبقى عند كل تحديث.</p>
-        <div class="flex wrap mt12">${done.map((c) => `<button class="btn grey sm" data-gs="${c.id}" data-busy="…">${SH.competitors?.[c.id] ? ic('refresh') : ic('plus')}${esc(c.name)}</button>`).join('') || '<span class="muted xs">حلّل منافساً أولاً</span>'}</div></div>
+        <div class="flex wrap mt12">${done.map((c) => `<button class="btn grey sm" data-gs="${c.id}" data-job="gs-${c.id}" data-busy="…">${SH.competitors?.[c.id] ? ic('refresh') : ic('plus')}${esc(c.name)}</button>`).join('') || '<span class="muted xs">حلّل منافساً أولاً</span>'}</div></div>
     </div>`}
-  </div>
-  <p class="hint mt12">كل معلومة موسومة: <b>حقيقة</b> (يذكرها مصدر) · <b>ملاحظة</b> (نمط ظاهر) · <b>استنتاج</b> (تحليل الذكاء الاصطناعي). أرقام المبيعات ونتائج الإعلانات الداخلية لا تُعتبر حقائق. يمكنك أيضاً تنزيل الملفات بصيغة CSV.</p>`);
+  </div>`;
+
+  const v = view(`${tabNote}${body}
+  <p class="hint mt12">كل معلومة موسومة: <b>حقيقة</b> (يذكرها مصدر) · <b>ملاحظة</b> (نمط ظاهر) · <b>استنتاج</b> (تحليل الذكاء الاصطناعي). أرقام المبيعات ونتائج الإعلانات الداخلية لا تُعتبر حقائق.</p>`);
   const reload = () => PAGES.research();
-  $('#rdisc', v).onclick = (e) => busy(e.currentTarget, async () => { try { const r = await api(`/api/brands/${b.id}/research/discover`, { method: 'POST', body: { market: $('#rmk').value, seeds: $('#rseed').value } }); toast(`وجدت ${r.found.length} منافس جديد · ${r.web ? 'من الإنترنت' : 'بدون بحث على الإنترنت'}`); reload(); } catch (err) { toast(err.message, true); } });
-  $('#radd', v).onclick = () => modal(`<h2>إضافة منافس</h2><label class="lbl">الاسم</label><input class="field" id="cn2"><label class="lbl">الموقع (اختياري)</label><input class="field ltr" id="cw2"><label class="lbl">إنستغرام (اختياري)</label><input class="field ltr" id="ci2" placeholder="@handle"><div class="foot"><button class="btn ghost" data-x>إلغاء</button><button class="btn primary" id="cs2">إضافة</button></div>`, (m) => {
+  $$('[data-rt]', v).forEach((x) => (x.onclick = () => { S.rtab = x.dataset.rt; reload(); }));
+  $$('[data-dl]', v).forEach((x) => (x.onclick = () => downloadMenu(x, `c=${x.dataset.dl}`)));
+  $$('[data-dlq]', v).forEach((x) => (x.onclick = () => downloadMenu(x, x.dataset.dlq)));
+  $('#cpdl', v) && ($('#cpdl', v).onclick = (e) => downloadMenu(e.currentTarget, 'kind=compare'));
+  $('#mkdl', v) && ($('#mkdl', v).onclick = (e) => downloadMenu(e.currentTarget, 'kind=market'));
+  $$('[data-cs]', v).forEach((x) => (x.onclick = () => { const id = x.dataset.cs; if (S.rsel.has(id)) S.rsel.delete(id); else if (S.rsel.size < 5) S.rsel.add(id); else return toast('حتى 5 منافسين', true); x.classList.toggle('on', S.rsel.has(id)); }));
+  $('#cpgo', v) && ($('#cpgo', v).onclick = (e) => busy(e.currentTarget, async () => {
+    if (!S.rsel.size) return toast('اختر منافساً واحداً على الأقل', true);
+    try { await api(`/api/brands/${b.id}/research/compare`, { method: 'POST', body: { ids: [...S.rsel] } }); toast('المقارنة جاهزة'); reload(); } catch (err) { toast(err.message, true); }
+  }));
+  $('#rdisc', v) && ($('#rdisc', v).onclick = (e) => busy(e.currentTarget, async () => { try { const r = await api(`/api/brands/${b.id}/research/discover`, { method: 'POST', body: { market: $('#rmk').value, seeds: $('#rseed').value } }); toast(`وجدت ${r.found.length} منافس جديد · ${r.web ? 'من الإنترنت' : 'بدون بحث على الإنترنت'}`); reload(); } catch (err) { toast(err.message, true); } }));
+  $('#radd', v) && ($('#radd', v).onclick = () => modal(`<h2>إضافة منافس</h2><label class="lbl">الاسم</label><input class="field" id="cn2">
+    <p class="muted xs mt8">أضف ما تعرفه من قنواته (اختياري). الباقي يبحث عنه التحليل.</p>
+    <div class="grid c2" style="gap:10px">${['website', 'instagram', 'tiktok', 'facebook', 'youtube', 'x', 'snapchat', 'linkedin'].map((k) => `<div><label class="lbl">${CHL[k]}</label><input class="field ltr" data-chn="${k}" style="text-align:left" placeholder="${k === 'website' ? 'example.com' : '@handle أو رابط'}"></div>`).join('')}</div>
+    <div class="foot"><button class="btn ghost" data-x>إلغاء</button><button class="btn primary" id="cs2">إضافة</button></div>`, (m) => {
+    m.style.maxWidth = '620px';
     $('[data-x]', m).onclick = closeModal;
-    $('#cs2').onclick = () => busy($('#cs2'), async () => { try { await api(`/api/brands/${b.id}/research/competitors`, { method: 'POST', body: { name: $('#cn2').value, website: $('#cw2').value, instagram: $('#ci2').value } }); closeModal(); reload(); } catch (err) { toast(err.message, true); } });
-  });
-  $$('[data-go]', v).forEach((x) => (x.onclick = () => go(x.dataset.go)));
+    $('#cs2').onclick = () => busy($('#cs2'), async () => { try { const channels = Object.fromEntries($$('[data-chn]', m).map((i) => [i.dataset.chn, i.value.trim()]).filter(([, x]) => x)); await api(`/api/brands/${b.id}/research/competitors`, { method: 'POST', body: { name: $('#cn2').value, channels } }); closeModal(); reload(); } catch (err) { toast(err.message, true); } });
+  }));
+  $('#gconr', v) && ($('#gconr', v).onclick = googleConnect);
   $('#gmaster', v) && ($('#gmaster', v).onclick = (e) => busy(e.currentTarget, async () => {
     try { const r = await api(`/api/brands/${b.id}/research/sheets/master`, { method: 'POST', body: {} }); toast(r.pulled ? `تم التحديث · طُبّق ${r.pulled} قرار من الشيت` : 'تم تحديث الملف الرئيسي'); window.open(r.url, '_blank', 'noopener'); reload(); } catch (err) { toast(err.message, true); }
   }));
@@ -1945,15 +2194,15 @@ PAGES.research = async () => {
     try { const r = await api(`/api/brands/${b.id}/research/sheets/${x.dataset.gs}`, { method: 'POST', body: {} }); toast('تم إنشاء/تحديث ملف المنافس'); window.open(r.url, '_blank', 'noopener'); reload(); } catch (err) { toast(err.message, true); }
   })));
   const analyzeOne = (cid) => api(`/api/brands/${b.id}/research/competitors/${cid}/analyze`, { method: 'POST', body: {} });
-  $$('[data-an]', v).forEach((x) => (x.onclick = () => busy(x, async () => { try { const c = await analyzeOne(x.dataset.an); toast(`تم تحليل ${c.name}`); reload(); } catch (err) { toast(err.message, true); } })));
-  $('#rall', v) && ($('#rall').onclick = (e) => busy(e.currentTarget, async () => {
-    for (const c of R.competitors.filter((y) => y.status !== 'researched')) { try { toast(`يحلل ${c.name}…`); await analyzeOne(c.id); } catch (err) { toast(`${c.name}: ${err.message}`, true); } }
+  $$('[data-an]', v).forEach((x) => (x.onclick = () => busy(x, async () => { try { const c = await analyzeOne(x.dataset.an); toast(`تم تحليل ${c.name}`); S.rsel?.add(c.id); reload(); } catch (err) { toast(err.message, true); } })));
+  $('#rall', v) && ($('#rall', v).onclick = (e) => busy(e.currentTarget, async () => {
+    for (const c of R.competitors.filter((y) => y.status !== 'researched')) { try { toast(`يحلل ${c.name}…`); const r = await analyzeOne(c.id); S.rsel?.add(r.id); } catch (err) { toast(`${c.name}: ${err.message}`, true); } }
     reload();
   }));
   $$('[data-rm]', v).forEach((x) => (x.onclick = async () => { if (!(await confirmBox('حذف المنافس؟', 'سيُحذف من القائمة مع تحليله.', 'حذف', true))) return; await api(`/api/brands/${b.id}/research/competitors/${x.dataset.rm}`, { method: 'DELETE' }); reload(); }));
   $$('[data-open]', v).forEach((x) => (x.onclick = () => competitorModal(R.competitors.find((c) => c.id === x.dataset.open))));
-  $('#rcross', v).onclick = (e) => busy(e.currentTarget, async () => { try { await api(`/api/brands/${b.id}/research/cross`, { method: 'POST', body: {} }); toast('تم التحليل المقارن'); reload(); } catch (err) { toast(err.message, true); } });
-  $$('[data-op]', v).forEach((x) => (x.onclick = () => busy(x, async () => { try { await api(`/api/brands/${b.id}/research/opportunities/${x.dataset.op}`, { method: 'PATCH', body: { status: x.dataset.st } }); reload(); } catch (err) { toast(err.message, true); } })));
+  $('#rcross', v) && ($('#rcross', v).onclick = (e) => busy(e.currentTarget, async () => { try { await api(`/api/brands/${b.id}/research/cross`, { method: 'POST', body: {} }); toast('تم التحليل المقارن'); reload(); } catch (err) { toast(err.message, true); } }));
+  $$('[data-op]', v).forEach((x) => (x.onclick = () => busy(x, async () => { try { await api(`/api/brands/${b.id}/research/opportunities/${x.dataset.op}`, { method: 'PATCH', body: { status: x.dataset.st } }); S.ov = null; toast(x.dataset.st === 'approved' ? 'تمت الموافقة · تظهر في صفحة الموافقات' : 'تم الرفض'); reload(); } catch (err) { toast(err.message, true); } })));
   $$('[data-use-op]', v).forEach((x) => (x.onclick = () => {
     const o = X.opportunities.find((y) => y.id === x.dataset.useOp);
     const fmt2 = String(o.format || '').toLowerCase();
@@ -1964,14 +2213,90 @@ PAGES.research = async () => {
 };
 function competitorModal(c) {
   const p = c.profile;
-  modal(`<div class="flex"><h2 class="grow">${esc(c.name)}</h2><a class="btn grey sm" href="/api/brands/${S.brand.id}/research/export?c=${c.id}" download>${ic('download')}CSV</a></div>
+  modal(`<div class="flex"><h2 class="grow">${esc(c.name)}</h2><button class="btn grey sm" id="cmdl">${ic('download')}تنزيل</button></div>
     <p class="muted xs mt8">${c.web ? 'بحث على الإنترنت' : 'بدون بحث على الإنترنت: كل شيء استنتاج'} · ${esc(c.via || '')} · ${rel(c.researchedAt)}</p>
     <p class="sm mt12">${esc(p.summary)}</p>
-    <div class="rows mt12">${RS.filter(([k]) => p[k]).map(([k, l]) => `<div class="row-i" style="align-items:flex-start"><div class="t"><b style="font-weight:600">${l}</b><small style="color:var(--text-2);white-space:normal">${claim(p[k])}</small></div></div>`).join('')}</div>
+    ${(p.channels || []).length ? `<span class="lbl">القنوات (${p.channels.length})</span><div class="tablewrap"><table><thead><tr><th>القناة</th><th>الجمهور</th><th>النشاط</th><th>المحتوى</th></tr></thead><tbody>${p.channels.map((x) => `<tr><td>${x.url ? `<a class="src" href="${esc(chUrl(x.platform, x.url))}" target="_blank" rel="noopener">${CHL[x.platform] || x.platform} ↗</a>` : CHL[x.platform] || x.platform}</td><td class="tnum">${esc(x.audience || '—')}</td><td class="xs sec">${esc(x.activity || '')}</td><td class="xs">${esc(x.content)} ${chip(BASIS[x.basis]?.[0] || '', BASIS[x.basis]?.[1] || '', false)}</td></tr>`).join('')}</tbody></table></div>` : `<div class="flex wrap mt8 xs" style="gap:8px">${chLinks(c)}</div>`}
+    <div class="rows mt12">${[...RS, ['pricing', 'الأسعار'], ['reviews', 'آراء العملاء']].filter(([k]) => p[k]).map(([k, l]) => `<div class="row-i" style="align-items:flex-start"><div class="t"><b style="font-weight:600">${l}</b><small style="color:var(--text-2);white-space:normal">${claim(p[k])}</small></div></div>`).join('')}</div>
     ${RL.filter(([k]) => p[k]?.length).map(([k, l]) => `<span class="lbl">${l}</span><ul class="sm sec" style="padding-inline-start:18px">${p[k].map((x) => `<li>${claim(x)}</li>`).join('')}</ul>`).join('')}
     ${c.sources?.length ? `<details class="mt12"><summary class="sm">المصادر (${c.sources.length})</summary><ul class="xs" style="padding-inline-start:18px">${c.sources.map((s2) => `<li><a class="src" href="${esc(s2.url)}" target="_blank" rel="noopener">${esc(s2.title || s2.url)}</a></li>`).join('')}</ul></details>` : ''}
-    <div class="foot"><button class="btn ghost" data-x>إغلاق</button></div>`, (m) => { $('[data-x]', m).onclick = closeModal; m.style.maxWidth = '760px'; });
+    <div class="foot"><button class="btn ghost" data-x>إغلاق</button></div>`, (m) => { $('[data-x]', m).onclick = closeModal; m.style.maxWidth = '860px'; $('#cmdl', m).onclick = (e) => downloadMenu(e.currentTarget, `c=${c.id}`); });
 }
+
+// ---------- insights (Layer 6) ----------
+PAGES.insights = async () => {
+  if (needBrand()) return header();
+  const b = S.brand;
+  header(`<button class="btn primary" id="ilearn" data-busy="يحلّل…">${ic('sparkle')}ماذا تعلّمنا؟</button>`);
+  const I = await api(`/api/brands/${b.id}/insights`);
+  if (S.page !== 'insights') return;
+  const P = I.posts || [];
+  const sum = (k) => P.reduce((a, x) => a + (Number(x[k]) || 0), 0);
+  const reach = (x) => x.reach || x.impressions || x.views || 0;
+  const avgEr = P.length ? (P.reduce((a, x) => a + (Number(x.engagementRate) || 0), 0) / P.length).toFixed(2) : '0';
+  const top = [...P].sort((a, c) => (c.engagementRate || 0) - (a.engagementRate || 0)).slice(0, 3);
+  const byPlat = {};
+  for (const x of P) { const k = x.platform || 'other'; byPlat[k] = byPlat[k] || { n: 0, reach: 0, er: 0 }; byPlat[k].n++; byPlat[k].reach += reach(x); byPlat[k].er += Number(x.engagementRate) || 0; }
+  const L = I.learned;
+  const v = view(`${!I.social?.accounts?.length ? `<div class="card mb16"><div class="flex wrap" style="gap:10px"><span class="ic">${ic('plug')}</span><div class="grow"><b class="sm">اربط حساباتك لتظهر الإحصائيات</b><p class="muted xs mt8">بعد ربط إنستغرام وتيك توك وفيسبوك ويوتيوب… تقرأ المنصة الوصول والتفاعل لكل منشور، وتتعلّم ما ينجح لبراندك وتستعمله في المحتوى القادم.</p></div><button class="btn primary sm" id="iacc">${ic('plug')}اربط حساباتك</button></div></div>` : ''}
+    ${I.note ? `<div class="inset sm mb16">${esc(I.note)}</div>` : ''}
+    <div class="grid c4 mb16">
+      <div class="card stat feature"><span class="sec sm">متوسط التفاعل</span><div class="num">${avgEr}%</div><span class="muted xs">آخر 90 يوماً</span></div>
+      <div class="card stat"><span class="sec sm">المنشورات</span><div class="num">${P.length}</div></div>
+      <div class="card stat"><span class="sec sm">الوصول</span><div class="num">${short(P.reduce((a, x) => a + reach(x), 0))}</div></div>
+      <div class="card stat"><span class="sec sm">إعجابات · تعليقات · مشاركات</span><div class="num" style="font-size:22px">${short(sum('likes'))} · ${short(sum('comments'))} · ${short(sum('shares'))}</div></div>
+    </div>
+    ${L ? `<div class="card mb16"><div class="card-h"><span class="ic">${ic('sparkle')}</span><h3>ماذا تعلّم النظام</h3><div class="end"><span class="muted xs">${esc(L.via)} · ${L.posts} منشور · ${rel(L.at)}</span></div></div>
+      <p class="sm">${esc(L.summary)}</p>
+      <div class="grid c3 mt12">${[['works', 'ما ينجح', 'em'], ['fails', 'ما لا ينجح', 'am'], ['next', 'المحتوى القادم', 'vi']].map(([k, l, t]) => `<div class="inset"><div class="flex"><b class="grow sm">${l}</b>${chip(String(L[k].length), t, false)}</div><ul class="sm sec mt8" style="padding-inline-start:18px">${L[k].map((x) => `<li>${esc(x)}</li>`).join('')}</ul></div>`).join('')}</div>
+      ${L.bestTimes?.length ? `<div class="flex wrap mt12">${L.bestTimes.map((x) => chip(x, '', false)).join('')}</div>` : ''}
+      <p class="hint mt12">هذه الدروس تُستعمل تلقائياً عند توليد المحتوى الجديد.</p></div>` : ''}
+    <div class="grid c12">
+      <div class="card s8"><div class="card-h"><h3>المنشورات</h3><div class="end"><span class="muted xs">${P.length}</span></div></div>
+        ${P.length ? `<div class="tablewrap"><table><thead><tr><th>المنصة</th><th>المنشور</th><th>الوصول</th><th>إعجاب</th><th>تعليق</th><th>مشاركة</th><th>التفاعل</th></tr></thead><tbody>${P.slice(0, 60).map((x) => `<tr><td>${esc(PLAT_L[x.platform] || x.platform)}</td><td class="sm">${x.url ? `<a class="src" href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.text.slice(0, 70) || 'فتح')}</a>` : esc(x.text.slice(0, 70))}<div class="muted xs">${esc(String(x.at).slice(0, 10))}</div></td><td class="tnum">${short(reach(x))}</td><td class="tnum">${short(x.likes)}</td><td class="tnum">${short(x.comments)}</td><td class="tnum">${short(x.shares)}</td><td class="tnum"><b>${Number(x.engagementRate || 0).toFixed(1)}%</b></td></tr>`).join('')}</tbody></table></div>`
+        : `<div class="empty" style="padding:28px"><span class="ic">${ic('insights')}</span><h3>لا توجد إحصائيات بعد</h3><p>انشر من التقويم عبر الحسابات المربوطة، أو انتظر حتى تُزامَن منشوراتك الحالية.</p></div>`}</div>
+      <div class="stack s4">
+        <div class="card"><div class="card-h"><h3>حسب المنصة</h3></div>${Object.keys(byPlat).length ? `<div class="rows">${Object.entries(byPlat).map(([k, x]) => `<div class="row-i"><div class="t"><b>${esc(PLAT_L[k] || k)}</b><small>${x.n} منشور · وصول ${short(x.reach)}</small></div><b class="tnum">${(x.er / x.n).toFixed(1)}%</b></div>`).join('')}</div>` : '<p class="muted sm">—</p>'}</div>
+        <div class="card"><div class="card-h"><h3>الأفضل تفاعلاً</h3></div>${top.length ? `<div class="rows">${top.map((x, i) => `<div class="row-i"><span class="ic" style="width:26px;height:26px;border-radius:8px;font-size:12px">${i + 1}</span><div class="t"><b class="sm">${esc(x.text.slice(0, 60))}</b><small>${esc(PLAT_L[x.platform] || x.platform)} · ${Number(x.engagementRate || 0).toFixed(1)}%</small></div></div>`).join('')}</div>` : '<p class="muted sm">—</p>'}</div>
+      </div>
+    </div>`);
+  $('#iacc', v) && ($('#iacc', v).onclick = async () => { await socialState(true); accountsModal(); });
+  $('#ilearn').onclick = (e) => busy(e.currentTarget, async () => { try { await api(`/api/brands/${b.id}/insights/learn`, { method: 'POST', body: {} }); toast('تم التحليل'); PAGES.insights(); } catch (err) { toast(err.message, true); } });
+};
+
+// ---------- approvals (4 gates) ----------
+const GATES = { 1: ['البوابة 1 · البراند', 'brain'], 2: ['البوابة 2 · المفهوم والمحتوى', 'create'], 3: ['البوابة 3 · التصميم', 'studio'], 4: ['البوابة 4 · النشر', 'calendar'] };
+const AKIND = { brand: 'عقل البراند', opportunity: 'فرصة من البحث', content: 'محتوى مكتوب', design: 'تصميم', post: 'منشور مجدول' };
+PAGES.approvals = async () => {
+  if (needBrand()) return header();
+  const b = S.brand;
+  S.af = S.af || 'pending';
+  header(pills('af', [['pending', 'بانتظار قرارك'], ['approved', 'موافَق'], ['rejected', 'مرفوض'], ['all', 'الكل']], S.af));
+  const A = await api(`/api/brands/${b.id}/approvals`);
+  if (S.page !== 'approvals') return;
+  const list = A.items.filter((x) => S.af === 'all' || x.status === S.af);
+  const card = (x) => `<div class="inset appr ${x.status}" data-k="${x.kind}" data-i="${x.id}" ${x.batch ? `data-b="${x.batch}"` : ''}>
+    <div class="flex">${x.image ? `<img src="${esc(x.image)}" alt="" style="width:56px;height:56px;border-radius:10px;object-fit:cover;flex:none">` : ''}<div class="grow"><div class="flex wrap" style="gap:6px">${chip(AKIND[x.kind], '', false)}${x.meta?.platform ? chip(PLAT_L[x.meta.platform] || x.meta.platform, '', false) : ''}${x.meta?.best ? chip('الأفضل', 'em', false) : ''}${x.meta?.funnel ? chip(FUNNEL[x.meta.funnel] || x.meta.funnel, 'vi', false) : ''}</div>
+      <b class="sm" style="display:block;margin-top:6px">${esc(x.title || '—')}</b>${x.detail ? `<p class="xs sec mt8">${esc(x.detail)}</p>` : ''}</div></div>
+    <div class="flex mt12">${x.status === 'approved' ? chip('موافَق', 'em') : x.status === 'rejected' ? chip('مرفوض', 'ro') : chip('بانتظار قرارك', 'am')}<span class="grow"></span>
+      ${x.status !== 'approved' ? `<button class="btn primary sm" data-dec="approved">${ic('check')}موافقة</button>` : ''}${x.status !== 'rejected' ? `<button class="btn grey sm" data-dec="rejected">${ic('x')}رفض</button>` : ''}</div></div>`;
+  const v = view(`<div class="grid c4 mb16">${[['pending', 'بانتظار قرارك', 'am'], ['approved', 'موافَق', 'em'], ['rejected', 'مرفوض', 'ro']].map(([k, l]) => `<div class="card stat ${k === 'pending' && A.counts.pending ? 'feature' : ''}"><span class="sec sm">${l}</span><div class="num">${A.counts[k]}</div></div>`).join('')}
+    <div class="card stat"><span class="sec sm">كل القرارات</span><div class="num">${A.items.length}</div></div></div>
+    ${[1, 2, 3, 4].map((g) => { const rows = list.filter((x) => x.gate === g); return `<div class="card mb16"><div class="card-h"><h3>${GATES[g][0]}</h3><div class="end"><span class="muted xs">${rows.length}</span><button class="btn ghost sm" data-go="${GATES[g][1]}">فتح</button></div></div>
+      ${rows.length ? `<div class="grid c2">${rows.slice(0, 40).map(card).join('')}</div>` : `<p class="muted sm">لا شيء هنا${S.af === 'pending' ? ' بانتظار قرارك' : ''}.</p>`}</div>`; }).join('')}`);
+  $$('[data-go]', v).forEach((x) => (x.onclick = () => go(x.dataset.go)));
+  $$('[data-dec]', v).forEach((btn) => (btn.onclick = () => busy(btn, async () => {
+    const el = btn.closest('[data-k]'); const k = el.dataset.k; const id = el.dataset.i; const st = btn.dataset.dec;
+    try {
+      if (k === 'brand') { S.brand = await api(`/api/brands/${b.id}`, { method: 'PATCH', body: { gate1: st === 'approved' } }); }
+      if (k === 'opportunity') await api(`/api/brands/${b.id}/research/opportunities/${id}`, { method: 'PATCH', body: { status: st } });
+      if (k === 'content') await api(`/api/brands/${b.id}/batches/${el.dataset.b}/items/${id}`, { method: 'PATCH', body: { status: st } });
+      if (k === 'design') await api(`/api/brands/${b.id}/batches/${el.dataset.b}/items/${id}`, { method: 'PATCH', body: { designStatus: st } });
+      if (k === 'post') await api(`/api/brands/${b.id}/schedule/${id}`, { method: 'PATCH', body: { status: st === 'approved' ? 'scheduled' : 'rejected' } });
+      S.ov = null; S.batches = null; PAGES.approvals();
+    } catch (err) { toast(err.message, true); }
+  })));
+};
 
 // ---------- setup (database not connected yet) ----------
 function renderSetup(st) {
@@ -1998,6 +2323,16 @@ for (const [k, [phase, text]] of Object.entries(SOON)) {
   };
 }
 
+// A finished background task must never draw its page on top of another page.
+for (const k of Object.keys(PAGES)) { const f = PAGES[k]; PAGES[k] = (...a) => (S.page === k ? f(...a) : undefined); }
+drawStudio = ((f) => (...a) => (S.page === 'studio' ? f(...a) : undefined))(drawStudio);
+drawVideo = ((f) => (...a) => (S.page === 'studio' ? f(...a) : undefined))(drawVideo);
+drawVoice = ((f) => (...a) => (S.page === 'voice' ? f(...a) : undefined))(drawVoice);
+drawPlan = ((f) => (...a) => (S.page === 'create' ? f(...a) : undefined))(drawPlan);
+drawBatch = ((f) => (...a) => (S.page === 'create' ? f(...a) : undefined))(drawBatch);
+drawBatches = ((f) => (...a) => (S.page === 'create' ? f(...a) : undefined))(drawBatches);
+drawProviders = ((f) => (...a) => (S.page === 'providers' ? f(...a) : undefined))(drawProviders);
+
 // ---------------- boot ----------------
 async function boot() {
   let s;
@@ -2011,6 +2346,8 @@ async function boot() {
   if (!S.brands.some((b) => b.id === S.activeId)) S.activeId = S.brands[0]?.id || '';
   await setBrand(S.activeId, { silent: true });
   renderShell();
+  const sq = new URLSearchParams(location.search).get('social');
+  if (sq) { const acc = new URLSearchParams(location.search).get('acc'); history.replaceState(null, '', '/' + location.hash); setTimeout(() => toast(sq === 'ok' ? `تم ربط الحساب ${acc ? '@' + acc : ''} ✓` : `تعذّر الربط: ${sq}`, sq !== 'ok'), 300); }
   const gq = new URLSearchParams(location.search).get('google');
   if (gq) { history.replaceState(null, '', '/' + location.hash); setTimeout(() => toast(gq === 'ok' ? 'تم ربط حساب Google ✓' : gq, gq !== 'ok'), 300); }
   go(location.hash.slice(1) || 'home', { replace: true });
