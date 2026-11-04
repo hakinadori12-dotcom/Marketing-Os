@@ -1015,7 +1015,11 @@ function bindPicker(root, onChange) {
 // ---------- providers (BYOK) ----------
 const KIND = { text: 'كتابة وتحليل', image: 'صور', video: 'فيديو', search: 'بحث الإنترنت' };
 const PST = { active: ['يعمل', 'em'], saved: ['محفوظ', 'sk'], invalid: ['مرفوض', 'ro'], error: ['خطأ مؤقت', 'am'] };
-async function loadProviders() { S.prov = await api('/api/providers'); S.mcache = {}; return S.prov; }
+async function loadProviders() {
+  const [p, g] = await Promise.all([api('/api/providers'), api('/api/google').catch(() => null)]);
+  S.prov = p; S.google = g; S.mcache = {};
+  return S.prov;
+}
 PAGES.providers = async () => {
   header(`<button class="btn grey" id="ptt" data-busy="يختبر…">${ic('sparkle')}اختبار الكتابة</button>`);
   $('#ptt').onclick = (e) => busy(e.currentTarget, async () => {
@@ -1055,6 +1059,7 @@ function drawProviders() {
     <div class="card"><div class="card-h"><h3>ElevenLabs</h3><div class="end">${chip('لكل براند', 'vi')}</div></div><div class="flex wrap">${chip('أصوات', '', false)}</div>
       <p class="muted xs mt12">مفاتيح ElevenLabs تُضاف لكل براند على حدة (100+ مفتاح) مع تدوير حسب الرصيد.</p>
       <div class="flex mt16"><button class="btn ghost sm" data-go="keys">${ic('keys')}إدارة المفاتيح</button></div></div>
+    ${googleCard(S.google)}
   </div>`);
   $$('[data-go]', v).forEach((x) => (x.onclick = () => go(x.dataset.go)));
   $('#addCustom', v).onclick = customModal;
@@ -1072,6 +1077,56 @@ function drawProviders() {
     openMenu(btn, connected.filter((p) => p.kinds.includes(kind) && !p.soon).map((p) => ({ label: p.name, desc: p.defaults[kind], selected: st[kind]?.provider === p.id, onClick: () => saveAssign(kind, p.id, p.defaults[kind]) })));
   }));
   $$('[data-model]', v).forEach((btn) => (btn.onclick = () => modelModal(btn.dataset.model)));
+  bindGoogle(v);
+}
+
+// ---------- Google account (Sheets) ----------
+function googleCard(g) {
+  if (!g) return '';
+  return `<div class="card"><div class="card-h"><h3>Google Sheets</h3><div class="end">${g.connected ? chip('مربوط', 'em') : g.error ? chip('يحتاج إعادة ربط', 'ro') : g.configured ? chip('جاهز للربط', 'am') : ''}</div></div>
+    <div class="flex wrap">${chip('ملفات البحث', '', false)}${chip('موافقات', '', false)}</div>
+    <p class="muted xs mt12">${g.connected ? `<span class="ltr">${esc(g.email)}</span> · ${rel(g.connectedAt)}` : 'ملف لكل منافس + ملف رئيسي للبراند داخل Google Drive الخاص بك.'}</p>
+    ${g.error ? `<p class="xs mt8" style="color:var(--t-ro)">${esc(g.error)}</p>` : ''}
+    <div class="flex mt16">${g.connected
+      ? `<button class="btn grey sm" data-gcon>${ic('refresh')}إعادة الربط</button><button class="btn ghost sm" data-gset>الإعدادات</button><span class="grow"></span><button class="btn grey icon sm" data-goff aria-label="فصل">${ic('trash')}</button>`
+      : g.configured ? `<button class="btn primary sm" data-gcon>${ic('plug')}ربط حساب Google</button><button class="btn ghost sm" data-gset>الإعدادات</button>`
+      : `<button class="btn primary sm" data-gset>${ic('plug')}إعداد Google</button>`}</div></div>`;
+}
+async function googleConnect() {
+  try { const r = await api('/api/google/connect', { method: 'POST', body: {} }); location.href = r.url; } catch (err) { toast(err.message, true); }
+}
+function bindGoogle(v) {
+  $$('[data-gcon]', v).forEach((x) => (x.onclick = googleConnect));
+  $$('[data-gset]', v).forEach((x) => (x.onclick = googleModal));
+  $$('[data-goff]', v).forEach((x) => (x.onclick = async () => {
+    if (!(await confirmBox('فصل حساب Google؟', 'سيُلغى إذن المنصة. ملفاتك تبقى في Google Drive، ويمكنك الربط مجدداً لاحقاً.', 'فصل', true))) return;
+    try { S.google = await api('/api/google', { method: 'DELETE' }); drawProviders(); toast('تم الفصل'); } catch (err) { toast(err.message, true); }
+  }));
+}
+function googleModal() {
+  const g = S.google || {};
+  const steps = [
+    ['افتح <a class="src" href="https://console.cloud.google.com/projectcreate" target="_blank" rel="noopener">Google Cloud ↗</a> وأنشئ مشروعاً (أو استعمل مشروعاً موجوداً).', ''],
+    ['فعّل <a class="src" href="https://console.cloud.google.com/apis/library/sheets.googleapis.com" target="_blank" rel="noopener">Google Sheets API ↗</a> و <a class="src" href="https://console.cloud.google.com/apis/library/drive.googleapis.com" target="_blank" rel="noopener">Google Drive API ↗</a> (زر Enable).', ''],
+    ['<a class="src" href="https://console.cloud.google.com/auth/overview" target="_blank" rel="noopener">OAuth consent screen ↗</a>: نوع External، اسم التطبيق Marketing OS، وأضف بريدك في Test users.', ''],
+    ['<a class="src" href="https://console.cloud.google.com/auth/clients" target="_blank" rel="noopener">Clients ↗</a> ← Create client ← Web application. في Authorized redirect URIs الصق هذا الرابط:', g.redirectUri],
+    ['انسخ Client ID و Client Secret والصقهما هنا، ثم اضغط «حفظ والربط».', ''],
+  ];
+  modal(`<h2>ربط Google Sheets</h2><p class="muted sm mt8">تستعمل حساب Google الخاص بك. المنصة ترى وتعدّل <b>فقط</b> الملفات التي تنشئها هي، ولا تصل لباقي ملفاتك.</p>
+    <div class="rows mt12">${steps.map(([t, code], i) => `<div class="row-i" style="align-items:flex-start"><span class="ic" style="width:26px;height:26px;border-radius:8px;font-size:12px;flex:none">${i + 1}</span><div class="t"><small style="color:var(--text);white-space:normal">${t}</small>${code ? `<div class="flex mt8"><input class="field mono ltr sm" readonly value="${esc(code)}" style="text-align:left" id="gru"><button class="btn grey sm" id="gcp">نسخ</button></div>` : ''}</div></div>`).join('')}</div>
+    <label class="lbl">Client ID</label><input class="field mono ltr" id="gid" placeholder="…apps.googleusercontent.com" style="text-align:left" value="">
+    <label class="lbl">Client Secret</label><input class="field mono ltr" id="gsec" type="password" autocomplete="off" style="text-align:left" placeholder="${g.configured ? 'محفوظ · اكتب قيمة جديدة لتغييره' : 'GOCSPX-…'}">
+    <div class="foot"><button class="btn ghost" data-x>إلغاء</button><button class="btn primary" id="gsave" data-busy="يحفظ…">${ic('plug')}حفظ والربط</button></div>`, (m) => {
+    m.style.maxWidth = '640px';
+    $('[data-x]', m).onclick = closeModal;
+    $('#gcp', m) && ($('#gcp', m).onclick = () => { navigator.clipboard?.writeText($('#gru', m).value); toast('تم النسخ'); });
+    $('#gsave', m).onclick = () => busy($('#gsave', m), async () => {
+      try {
+        S.google = await api('/api/google', { method: 'PUT', body: { clientId: $('#gid', m).value.trim(), clientSecret: $('#gsec', m).value.trim() } });
+        closeModal(); await googleConnect();
+      } catch (err) { toast(err.message, true); }
+    });
+  });
 }
 async function saveAssign(kind, provider, model) {
   try { const r = await api('/api/providers/settings', { method: 'PUT', body: { [kind]: { provider, model } } }); S.prov.settings = r.settings; S.ov = null; drawProviders(); toast('تم الحفظ'); } catch (err) { toast(err.message, true); }
@@ -1828,7 +1883,9 @@ PAGES.research = async () => {
   if (needBrand()) return header();
   const b = S.brand;
   header(`<a class="btn ghost" href="/api/brands/${b.id}/research/export" download>${ic('download')}الملف الرئيسي (CSV)</a>`);
-  const R = (S.research = await api(`/api/brands/${b.id}/research`));
+  const [R, G] = await Promise.all([api(`/api/brands/${b.id}/research`), api('/api/google').catch(() => ({ connected: false }))]);
+  S.research = R;
+  const SH = R.sheets || { competitors: {} };
   const done = R.competitors.filter((c) => c.status === 'researched');
   const X = R.cross;
   const v = view(`
@@ -1844,7 +1901,7 @@ PAGES.research = async () => {
       <div class="flex"><b class="grow">${esc(c.name)}</b>${c.status === 'researched' ? chip('محلَّل', 'em') : chip('مكتشف', '')}${chip(c.kind === 'direct' ? 'مباشر' : 'غير مباشر', '', false)}</div>
       <p class="xs sec mt8">${esc(c.profile?.summary || c.why)}</p>
       <div class="flex wrap mt8 xs">${c.website ? `<a class="src" href="${esc(/^https?:/.test(c.website) ? c.website : 'https://' + c.website)}" target="_blank" rel="noopener">الموقع ↗</a>` : ''}${c.instagram ? `<a class="src" href="${esc(/^https?:/.test(c.instagram) ? c.instagram : 'https://instagram.com/' + c.instagram.replace('@', ''))}" target="_blank" rel="noopener">إنستغرام ↗</a>` : ''}</div>
-      <div class="flex mt12">${c.status === 'researched' ? `<button class="btn primary sm" data-open="${c.id}">عرض التحليل</button><button class="btn grey sm" data-an="${c.id}" data-busy="يحلل…">${ic('refresh')}تحديث</button>` : `<button class="btn primary sm" data-an="${c.id}" data-busy="يحلل… حتى دقيقتين">${ic('sparkle')}حلّل</button>`}<span class="grow"></span><button class="btn grey icon sm" data-rm="${c.id}" aria-label="حذف">${ic('trash')}</button></div></div>`).join('')}</div>`
+      <div class="flex mt12">${c.status === 'researched' ? `<button class="btn primary sm" data-open="${c.id}">عرض التحليل</button><button class="btn grey sm" data-an="${c.id}" data-busy="يحلل…">${ic('refresh')}تحديث</button>` : `<button class="btn primary sm" data-an="${c.id}" data-busy="يحلل… حتى دقيقتين">${ic('sparkle')}حلّل</button>`}<span class="grow"></span>${SH.competitors?.[c.id] ? `<a class="btn ghost sm" href="${esc(SH.competitors[c.id].url)}" target="_blank" rel="noopener">Sheet ↗</a>` : ''}<button class="btn grey icon sm" data-rm="${c.id}" aria-label="حذف">${ic('trash')}</button></div></div>`).join('')}</div>`
     : `<div class="empty" style="padding:24px"><span class="ic">${ic('search')}</span><h3>لا يوجد منافسون بعد</h3><p>اضغط "ابحث عن المنافسين"، أو أضفهم يدوياً، أو فعّل البحث داخل التحليل الذكي في عقل البراند.</p></div>`}
   </div>
   <div class="card"><div class="card-h"><span class="ic">${ic('insights')}</span><h3>3 · التحليل المقارن والفرص</h3><div class="end">${X ? `<span class="muted xs">${esc(X.via)} · ${rel(X.at)}</span>` : ''}<button class="btn ${X ? 'grey' : 'primary'} sm" id="rcross" data-busy="يقارن… حتى دقيقتين" ${done.length ? '' : 'disabled'}>${ic('sparkle')}${X ? 'أعد التحليل' : 'حلّل السوق'}</button></div></div>
@@ -1859,13 +1916,34 @@ PAGES.research = async () => {
       ${X.sources?.length ? `<details class="mt16"><summary class="sm">المصادر (${X.sources.length})</summary><ul class="xs" style="padding-inline-start:18px">${X.sources.map((s2) => `<li><a class="src" href="${esc(s2.url)}" target="_blank" rel="noopener">${esc(s2.title || s2.url)}</a></li>`).join('')}</ul></details>` : ''}`
     : `<p class="muted sm">بعد تحليل منافس واحد على الأقل، يقارن النظام بينهم ويستخرج نقاط القوة والضعف، المواضيع المستهلكة، الاحتياجات بلا جواب، والفرص المناسبة لهوية براندك مع مرحلة القمع.</p>`}
   </div>
-  <p class="hint mt12">كل معلومة موسومة: <b>حقيقة</b> (يذكرها مصدر) · <b>ملاحظة</b> (نمط ظاهر) · <b>استنتاج</b> (تحليل الذكاء الاصطناعي). أرقام المبيعات ونتائج الإعلانات الداخلية لا تُعتبر حقائق. الملفات تُصدَّر CSV وتُفتح مباشرة في Google Sheets.</p>`);
+  <div class="card mt16"><div class="card-h"><span class="ic">${ic('download')}</span><h3>4 · Google Sheets</h3><div class="end">${G.connected ? chip(esc(G.email || 'مربوط'), 'em', false) : chip('غير مربوط', '')}</div></div>
+    ${!G.connected ? `<p class="muted sm">اربط حساب Google مرة واحدة، فتنشئ المنصة ملفاً لكل منافس وملفاً رئيسياً لبراندك داخل Google Drive الخاص بك. تكتب ملاحظاتك في الشيت وتوافق أو ترفض الفرص من هناك.</p><div class="flex mt12"><button class="btn primary sm" data-go="providers">${ic('plug')}ربط حساب Google</button></div>`
+    : `<div class="grid c2">
+      <div class="inset"><div class="flex"><b class="grow">الملف الرئيسي للبراند</b>${SH.master ? `<span class="muted xs">${rel(SH.master.at)}</span>` : ''}</div>
+        <p class="xs sec mt8">مقارنة المنافسين · فرص السوق (مع خانة القرار) · الاتجاهات · أفكار المحتوى · القمع التسويقي · تقويم المحتوى · الموافقات</p>
+        <div class="flex wrap mt12">${SH.master ? `<a class="btn primary sm" href="${esc(SH.master.url)}" target="_blank" rel="noopener">افتح الملف ↗</a><button class="btn grey sm" id="gmaster" data-busy="يحدّث…">${ic('refresh')}تحديث</button><button class="btn ghost sm" id="gpull" data-busy="يقرأ…">${ic('check')}اقرأ قراراتي من الشيت</button>` : `<button class="btn primary sm" id="gmaster" data-busy="ينشئ الملف…">${ic('plus')}أنشئ الملف الرئيسي</button>`}</div></div>
+      <div class="inset"><div class="flex"><b class="grow">ملف لكل منافس</b><span class="muted xs">${Object.keys(SH.competitors || {}).length}/${done.length}</span></div>
+        <p class="xs sec mt8">الهوية · التموضع · السوشال ميديا · الحملات · الإعلانات · استراتيجية المحتوى · القمع · الفرص · المصادر. ملاحظاتك في العمود الأخير تبقى عند كل تحديث.</p>
+        <div class="flex wrap mt12">${done.map((c) => `<button class="btn grey sm" data-gs="${c.id}" data-busy="…">${SH.competitors?.[c.id] ? ic('refresh') : ic('plus')}${esc(c.name)}</button>`).join('') || '<span class="muted xs">حلّل منافساً أولاً</span>'}</div></div>
+    </div>`}
+  </div>
+  <p class="hint mt12">كل معلومة موسومة: <b>حقيقة</b> (يذكرها مصدر) · <b>ملاحظة</b> (نمط ظاهر) · <b>استنتاج</b> (تحليل الذكاء الاصطناعي). أرقام المبيعات ونتائج الإعلانات الداخلية لا تُعتبر حقائق. يمكنك أيضاً تنزيل الملفات بصيغة CSV.</p>`);
   const reload = () => PAGES.research();
   $('#rdisc', v).onclick = (e) => busy(e.currentTarget, async () => { try { const r = await api(`/api/brands/${b.id}/research/discover`, { method: 'POST', body: { market: $('#rmk').value, seeds: $('#rseed').value } }); toast(`وجدت ${r.found.length} منافس جديد · ${r.web ? 'من الإنترنت' : 'بدون بحث على الإنترنت'}`); reload(); } catch (err) { toast(err.message, true); } });
   $('#radd', v).onclick = () => modal(`<h2>إضافة منافس</h2><label class="lbl">الاسم</label><input class="field" id="cn2"><label class="lbl">الموقع (اختياري)</label><input class="field ltr" id="cw2"><label class="lbl">إنستغرام (اختياري)</label><input class="field ltr" id="ci2" placeholder="@handle"><div class="foot"><button class="btn ghost" data-x>إلغاء</button><button class="btn primary" id="cs2">إضافة</button></div>`, (m) => {
     $('[data-x]', m).onclick = closeModal;
     $('#cs2').onclick = () => busy($('#cs2'), async () => { try { await api(`/api/brands/${b.id}/research/competitors`, { method: 'POST', body: { name: $('#cn2').value, website: $('#cw2').value, instagram: $('#ci2').value } }); closeModal(); reload(); } catch (err) { toast(err.message, true); } });
   });
+  $$('[data-go]', v).forEach((x) => (x.onclick = () => go(x.dataset.go)));
+  $('#gmaster', v) && ($('#gmaster', v).onclick = (e) => busy(e.currentTarget, async () => {
+    try { const r = await api(`/api/brands/${b.id}/research/sheets/master`, { method: 'POST', body: {} }); toast(r.pulled ? `تم التحديث · طُبّق ${r.pulled} قرار من الشيت` : 'تم تحديث الملف الرئيسي'); window.open(r.url, '_blank', 'noopener'); reload(); } catch (err) { toast(err.message, true); }
+  }));
+  $('#gpull', v) && ($('#gpull', v).onclick = (e) => busy(e.currentTarget, async () => {
+    try { const r = await api(`/api/brands/${b.id}/research/sheets/pull`, { method: 'POST', body: {} }); toast(r.changed ? `طُبّق ${r.changed} قرار من الشيت` : 'لا توجد قرارات جديدة في الشيت'); reload(); } catch (err) { toast(err.message, true); }
+  }));
+  $$('[data-gs]', v).forEach((x) => (x.onclick = () => busy(x, async () => {
+    try { const r = await api(`/api/brands/${b.id}/research/sheets/${x.dataset.gs}`, { method: 'POST', body: {} }); toast('تم إنشاء/تحديث ملف المنافس'); window.open(r.url, '_blank', 'noopener'); reload(); } catch (err) { toast(err.message, true); }
+  })));
   const analyzeOne = (cid) => api(`/api/brands/${b.id}/research/competitors/${cid}/analyze`, { method: 'POST', body: {} });
   $$('[data-an]', v).forEach((x) => (x.onclick = () => busy(x, async () => { try { const c = await analyzeOne(x.dataset.an); toast(`تم تحليل ${c.name}`); reload(); } catch (err) { toast(err.message, true); } })));
   $('#rall', v) && ($('#rall').onclick = (e) => busy(e.currentTarget, async () => {
@@ -1933,6 +2011,8 @@ async function boot() {
   if (!S.brands.some((b) => b.id === S.activeId)) S.activeId = S.brands[0]?.id || '';
   await setBrand(S.activeId, { silent: true });
   renderShell();
+  const gq = new URLSearchParams(location.search).get('google');
+  if (gq) { history.replaceState(null, '', '/' + location.hash); setTimeout(() => toast(gq === 'ok' ? 'تم ربط حساب Google ✓' : gq, gq !== 'ok'), 300); }
   go(location.hash.slice(1) || 'home', { replace: true });
   document.fonts?.ready.then(() => placePills());
 }

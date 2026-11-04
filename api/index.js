@@ -11,6 +11,8 @@ const stt = require('../lib/stt');
 const assistant = require('../lib/assistant');
 const research = require('../lib/research');
 const identity = require('../lib/identity');
+const google = require('../lib/google');
+const gsheets = require('../lib/gsheets');
 const { sign, verify, safeEqual } = require('../lib/crypto');
 
 const COOKIE = 'mos_s';
@@ -80,6 +82,12 @@ function parse(req) {
   return { path: p.replace(/\/+$/, '') || '/', query };
 }
 
+
+function originOf(req) {
+  const host = String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim();
+  const proto = String(req.headers['x-forwarded-proto'] || (/^(localhost|127\.)/.test(host) ? 'http' : 'https')).split(',')[0].trim();
+  return host ? `${proto}://${host}` : '';
+}
 
 // ---------------- handlers ----------------
 async function health() {
@@ -268,6 +276,25 @@ module.exports = async (req, res) => {
         return send(res, 200, { ok: true });
       }
     }
+    // Google account (Sheets) — owner's own OAuth client.
+    if (path === '/api/google') {
+      if (method === 'GET') return send(res, 200, await google.status(originOf(req)));
+      if (method === 'PUT') { await google.saveConfig(await readBody(req)); return send(res, 200, await google.status(originOf(req))); }
+      if (method === 'DELETE') { await google.disconnect({ forget: query.get('forget') === '1' }); return send(res, 200, await google.status(originOf(req))); }
+    }
+    if (path === '/api/google/connect' && method === 'POST') return send(res, 200, { url: await google.authUrl(originOf(req)) });
+    if (path === '/api/google/callback' && method === 'GET') {
+      let to = '/?google=ok#providers';
+      try {
+        await google.callback({ code: query.get('code'), state: query.get('state'), error: query.get('error') }, originOf(req));
+      } catch (e) {
+        to = `/?google=${encodeURIComponent(e.message.slice(0, 300))}#providers`;
+      }
+      res.statusCode = 302;
+      res.setHeader('Location', to);
+      res.setHeader('Cache-Control', 'no-store');
+      return res.end();
+    }
     if (path === '/api/fonts' && method === 'GET') return send(res, 200, { fonts: await store.readJSON('fonts.json', {}) });
     if (path === '/api/fonts' && method === 'POST') {
       const body = await readBody(req);
@@ -388,6 +415,12 @@ module.exports = async (req, res) => {
       const rc = sub && sub.match(/^research\/competitors\/([a-f0-9]+)(\/analyze)?$/);
       if (rc && rc[2] && method === 'POST') return send(res, 200, await research.analyze(id, rc[1]));
       if (rc && !rc[2] && method === 'DELETE') { await research.remove(id, rc[1]); return send(res, 200, { ok: true }); }
+      if (sub === 'research/sheets' && method === 'GET') return send(res, 200, await gsheets.status(id));
+      if (sub === 'research/sheets/master' && method === 'POST') return send(res, 200, await gsheets.syncMaster(id));
+      if (sub === 'research/sheets/pull' && method === 'POST') return send(res, 200, await gsheets.pull(id));
+      const rsh = sub && sub.match(/^research\/sheets\/(master|[a-f0-9]+)$/);
+      if (rsh && method === 'POST') return send(res, 200, await gsheets.syncCompetitor(id, rsh[1]));
+      if (rsh && method === 'DELETE') { await gsheets.forget(id, rsh[1]); return send(res, 200, { ok: true }); }
       const ro = sub && sub.match(/^research\/opportunities\/([a-f0-9]+)$/);
       if (ro && method === 'PATCH') return send(res, 200, await research.setOpportunity(id, ro[1], (await readBody(req)).status));
       if (sub === 'identity/palettes' && method === 'POST') return send(res, 200, { palettes: await identity.palettes(id, await readBody(req)) });
