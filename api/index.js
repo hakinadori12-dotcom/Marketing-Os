@@ -242,8 +242,14 @@ module.exports = async (req, res) => {
     if (path === '/api/providers') {
       if (method === 'GET') return send(res, 200, { providers: await providers.list(), settings: await providers.settings() });
     }
+    if (path === '/api/models') return send(res, 200, await providers.models(query.get('kind') || 'text'));
+    if (path === '/api/providers/custom' && method === 'POST') {
+      const r = await providers.addCustom(await readBody(req));
+      await store.logEvent({ kind: 'connect', provider: r.id, status: 200, ms: Date.now() - started });
+      return send(res, 200, r);
+    }
     if (path === '/api/providers/settings' && method === 'PUT') return send(res, 200, { settings: await providers.setSettings(await readBody(req)) });
-    const pm = path.match(/^\/api\/providers\/([a-z0-9]+)(\/test)?$/);
+    const pm = path.match(/^\/api\/providers\/([a-z0-9_]+)(\/test)?$/);
     if (pm) {
       if (pm[2] && method === 'POST') return send(res, 200, await providers.test(pm[1]));
       if (!pm[2] && method === 'PUT') {

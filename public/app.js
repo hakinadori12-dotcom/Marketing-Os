@@ -93,7 +93,7 @@ const S = {
   ov: null, brainTab: 'identity', keys: null, keyFilter: 'all', keyQuery: '', keySel: new Set(), keyLimit: 50,
   voices: null, models: null, audio: null, voiceId: store.get('mos-voice', ''), voiceQuery: '', tts: { modelId: 'eleven_multilingual_v2', stability: 0.5, similarity: 0.75, style: 0, speed: 1, text: '' },
   analysis: null, sys: null, textTest: null, storage: null,
-  ctab: 'new', opts: null, prov: null, batches: null, batch: null, plan: null, planMonths: [], images: null,
+  ctab: 'new', stab: 'image', mcache: {}, pick: (() => { try { return JSON.parse(store.get('mos-pick', '{}')) || {}; } catch { return {}; } })(), opts: null, prov: null, batches: null, batch: null, plan: null, planMonths: [], images: null,
   form: { platforms: ['instagram'], type: 'post', goal: 'engagement', dialect: 'darija', framework: 'auto', count: 3, idea: '', productId: '', occasion: '' },
   planForm: { month: '', perWeek: 4, platforms: ['instagram', 'facebook'], goal: 'engagement', dialect: 'darija' },
   img: { prompt: '', aspect: '1:1', style: 'photo', useLogo: false, useColors: true, text: '', quality: 'medium' },
@@ -101,7 +101,7 @@ const S = {
 
 const NAV = [
   ['g', 'Workspace'], ['home', 'لوحة القيادة'], ['brands', 'البراندات'], ['brain', 'عقل البراند'],
-  ['g', 'Create'], ['create', 'إنشاء المحتوى'], ['studio', 'استوديو الصور'], ['voice', 'التعليق الصوتي'],
+  ['g', 'Create'], ['create', 'إنشاء المحتوى'], ['studio', 'الاستوديو'], ['voice', 'التعليق الصوتي'],
   ['g', 'Strategy'], ['research', 'بحث المنافسين', 4], ['approvals', 'الموافقات', 3], ['calendar', 'التقويم والنشر', 3], ['insights', 'الأداء والتعلّم', 4],
   ['g', 'System'], ['providers', 'المفاتيح والمزوّدون'], ['keys', 'مفاتيح ElevenLabs'], ['api', 'لوحة الـ API'],
 ];
@@ -113,7 +113,7 @@ const TITLES = {
   keys: ['مفاتيح ElevenLabs', 'مخزن مفاتيح لكل براند، مع تدوير تلقائي حسب الرصيد'],
   api: ['لوحة الـ API', 'المزوّدون والاستخدام والسجلات'],
   create: ['إنشاء المحتوى', 'منشورات جاهزة بصوت براندك، وخطة شهرية كاملة'],
-  studio: ['استوديو الصور', 'صور إعلانية بهوية براندك من مفتاحك الخاص'],
+  studio: ['الاستوديو', 'صور وفيديو بهوية براندك من مفاتيحك الخاصة'],
   providers: ['المفاتيح والمزوّدون', 'اربط مفاتيحك الخاصة من كل شركة. أنت تدفع للمزوّد مباشرة'],
   research: ['بحث المنافسين', 'كل منافس في Google Sheet خاص به'],
   approvals: ['الموافقات', 'لا شيء يُنشر قبل موافقتك'],
@@ -331,6 +331,7 @@ document.addEventListener('click', (e) => {
   if (key === 'kf') { S.keyFilter = v; S.keyLimit = 50; drawKeys(); }
   if (key === 'ctab') { S.ctab = v; S.batch = null; PAGES.create(); }
   if (key === 'aspect') S.img.aspect = v;
+  if (key === 'stab') { S.stab = v; PAGES.studio(); }
 });
 
 // ---------------- brand create ----------------
@@ -464,6 +465,7 @@ PAGES.brain = async () => {
   $('#ap') && ($('#ap').onclick = (e) => busy(e.currentTarget, async () => { await patchBrand({ gate1: true }); toast('تم اعتماد البراند (بوابة 1)'); }));
   $('#unap') && ($('#unap').onclick = (e) => busy(e.currentTarget, () => patchBrand({ gate1: false })));
   const tabs = pills('brain', [['identity', 'الهوية'], ['products', `المنتجات${b.products.length ? ' · ' + b.products.length : ''}`], ['visual', 'الهوية البصرية'], ['analyze', '✦ التحليل الذكي']], S.brainTab);
+  if (S.brainTab === 'analyze') await loadModels('text').catch(() => null);
   const html = { identity: brainIdentity, products: brainProducts, visual: brainVisual, analyze: brainAnalyze }[S.brainTab]();
   const v = view(`<div class="toolbar">${tabs}</div>${html}`);
   bindBrain(v);
@@ -547,7 +549,7 @@ function brainAnalyze() {
     ${a.products.length ? `<span class="lbl">المنتجات (${a.products.length})</span><div class="rows">${a.products.map((p, i) => `<label class="row-i" style="cursor:pointer"><input type="checkbox" class="check" data-ap="${i}" ${b.products.some((x) => x.name === p.name) ? '' : 'checked'}><div class="t"><b>${esc(p.name)}</b><small>${esc([p.price, p.description].filter(Boolean).join(' · '))}</small></div></label>`).join('')}</div>` : ''}
     ${a.colors.length ? `<span class="lbl">ألوان من الموقع</span><div class="flex wrap" style="gap:10px">${a.colors.map((c) => `<label class="flex" style="cursor:pointer"><input type="checkbox" class="check" data-ac="${c}" ${(b.visual?.colors || []).includes(c) ? '' : 'checked'}><span class="swatch" style="background:${c};width:32px;height:32px"></span><span class="mono xs ltr">${c}</span></label>`).join('')}</div>` : ''}
     <div class="flex mt16" style="justify-content:flex-end"><button class="btn ghost" id="adisc">تجاهل</button><button class="btn primary" id="aapply">${ic('check')}حفظ المحدد</button></div></div>`;
-  return `<div class="grid c12"><div class="card s8"><div class="card-h"><h3>التحليل الذكي</h3><div class="end">${chip('بمفتاحك', 'vi', false)}</div></div>
+  return `<div class="grid c12"><div class="card s8"><div class="card-h"><h3>التحليل الذكي</h3><div class="end" style="min-width:240px">${pickerHTML('text')}</div></div>
     <p class="muted sm">النظام يقرأ موقعك و/أو ملاحظاتك ويقترح الحقول. كل اقتراح موسوم بمصدره، ولا يُحفظ شيء قبل موافقتك.</p>
     <label class="lbl">رابط الموقع</label><input class="field ltr" id="aurl" value="${esc(b.website)}" placeholder="example.com" style="text-align:left">
     <label class="lbl">ملاحظات عن البراند (اختياري)</label><textarea class="field" id="atext" rows="4" placeholder="مثلاً: نبيع مستحضرات طبيعية بزيت الأرغان للنساء في المغرب، أسلوبنا دافئ وبالدارجة…"></textarea>
@@ -557,6 +559,7 @@ function brainAnalyze() {
 
 function bindBrain(v) {
   const b = S.brand;
+  bindPicker(v, () => PAGES.brain());
   $$('[data-tab]', v).forEach((x) => (x.onclick = () => { S.brainTab = x.dataset.tab; PAGES.brain(); }));
   // inline edit
   $$('[data-edit]', v).forEach((el) => {
@@ -630,7 +633,7 @@ function bindBrain(v) {
   // analyze
   $('#arun', v) && ($('#arun').onclick = (e) => busy(e.currentTarget, async () => {
     try {
-      S.analysis = await api(`/api/brands/${b.id}/analyze`, { method: 'POST', body: { url: $('#aurl').value.trim(), text: $('#atext').value } });
+      S.analysis = await api(`/api/brands/${b.id}/analyze`, { method: 'POST', body: { url: $('#aurl').value.trim(), text: $('#atext').value, ai: aiOf('text') } });
       if (!Object.keys(S.analysis.fields).length && !S.analysis.products.length) toast('لم أجد معلومات كافية. أضف ملاحظات عن البراند.', true);
       PAGES.brain();
     } catch (err) { toast(err.message, true); }
@@ -919,10 +922,46 @@ PAGES.api = async () => {
   };
 };
 
+// ---------- model picker (each page shows only the models of its kind) ----------
+const KIND_L = { text: 'نموذج الكتابة', image: 'نموذج الصور', video: 'نموذج الفيديو' };
+async function loadModels(kind, force = false) {
+  if (!force && S.mcache[kind]) return S.mcache[kind];
+  S.mcache[kind] = await api(`/api/models?kind=${kind}`);
+  const cur = S.pick[kind];
+  if (cur && !S.mcache[kind].models.some((m) => m.provider === cur.provider && m.model === cur.model)) delete S.pick[kind];
+  return S.mcache[kind];
+}
+function aiOf(kind) {
+  const first = S.mcache[kind]?.models.find((m) => !m.soon);
+  return S.pick[kind] || S.mcache[kind]?.current || (first ? { provider: first.provider, model: first.model } : null);
+}
+function pickerHTML(kind) {
+  const cur = aiOf(kind);
+  const pname = cur ? (S.mcache[kind]?.models.find((m) => m.provider === cur.provider)?.providerName || cur.provider) : '';
+  return `<div class="sel picker"><button class="sel-btn" data-mp="${kind}" data-menu title="${KIND_L[kind]}">${ic(kind === 'text' ? 'edit' : kind === 'image' ? 'studio' : 'play')}<span class="lab">${cur ? `${esc(pname)} <span class="muted xs ltr">· ${esc(cur.model)}</span>` : 'اختر النموذج'}</span>${ic('chev')}</button></div>`;
+}
+function bindPicker(root, onChange) {
+  $$('[data-mp]', root).forEach((btn) => (btn.onclick = async () => {
+    const kind = btn.dataset.mp;
+    const data = await loadModels(kind).catch(() => ({ models: [] }));
+    const cur = aiOf(kind);
+    if (!data.models.length) return openMenu(btn, [{ label: 'لا توجد نماذج مناسبة', desc: 'اربط مفتاحاً يدعم ' + KIND[kind], icon: 'plug', onClick: () => go('providers') }], { width: 300 });
+    const groups = {};
+    for (const m of data.models) (groups[m.providerName] = groups[m.providerName] || []).push(m);
+    const items = [];
+    for (const [name, list] of Object.entries(groups)) {
+      if (items.length) items.push({ divider: true });
+      for (const m of list) items.push({ label: m.model, desc: name + (data.current?.provider === m.provider && data.current?.model === m.model ? ' · الافتراضي' : '') + (m.soon && kind === 'video' ? ' · قريباً' : ''), selected: cur?.provider === m.provider && cur?.model === m.model, onClick: () => { S.pick[kind] = { provider: m.provider, model: m.model }; store.set('mos-pick', JSON.stringify(S.pick)); onChange && onChange(); } });
+    }
+    items.push({ divider: true }, { label: 'تحديث القائمة من المزوّدين', icon: 'refresh', onClick: async () => { delete S.mcache[kind]; await loadModels(kind, true); onChange && onChange(); } });
+    openMenu(btn, items, { search: data.models.length > 8, width: 340 });
+  }));
+}
+
 // ---------- providers (BYOK) ----------
 const KIND = { text: 'كتابة وتحليل', image: 'صور', video: 'فيديو' };
 const PST = { active: ['يعمل', 'em'], saved: ['محفوظ', 'sk'], invalid: ['مرفوض', 'ro'], error: ['خطأ مؤقت', 'am'] };
-async function loadProviders() { S.prov = await api('/api/providers'); return S.prov; }
+async function loadProviders() { S.prov = await api('/api/providers'); S.mcache = {}; return S.prov; }
 PAGES.providers = async () => {
   header(`<button class="btn grey" id="ptt" data-busy="يختبر…">${ic('sparkle')}اختبار الكتابة</button>`);
   $('#ptt').onclick = (e) => busy(e.currentTarget, async () => {
@@ -953,15 +992,18 @@ function drawProviders() {
   <div class="grid c3">${list.map((p) => { const stt = PST[p.status] || ['', '']; return `<div class="card">
     <div class="card-h"><h3>${esc(p.name)}</h3><div class="end">${p.connected ? chip(stt[0], stt[1]) : p.soon ? chip('الفيديو قريباً', '') : ''}</div></div>
     <div class="flex wrap">${p.kinds.map((k) => chip(KIND[k], '', false)).join('')}</div>
+    ${p.custom ? `<p class="muted xs mt8 ltr" style="text-align:right">${esc(p.baseUrl)} · ${p.compat === 'anthropic' ? 'Anthropic' : 'OpenAI'}-compatible</p>` : ''}
     <p class="muted xs mt12">${p.connected ? `<span class="mono ltr">••••${esc(p.last4)}</span> · ${p.models.length ? `${p.models.length} نموذج متاح · ` : ''}${rel(p.testedAt)}` : `احصل على المفتاح من <span class="ltr">${esc(p.site)}</span>`}</p>
     ${p.error ? `<p class="xs mt8" style="color:var(--t-ro)">${esc(p.error)}</p>` : ''}
     <div class="flex mt16">${p.connected ? `<button class="btn grey sm" data-pt="${p.id}">${ic('refresh')}اختبار</button><button class="btn ghost sm" data-pc="${p.id}">تغيير المفتاح</button><span class="grow"></span><button class="btn grey icon sm" data-pd="${p.id}" aria-label="فصل">${ic('trash')}</button>` : `<button class="btn primary sm" data-pc="${p.id}">${ic('plug')}ربط المفتاح</button>`}</div>
   </div>`; }).join('')}
+    <div class="card ent" id="addCustom" style="cursor:pointer"><div class="add" style="min-height:100%"><span class="ic">${ic('plus')}</span><b>مزوّد مخصص</b><span class="xs">أي API متوافق مع OpenAI أو Anthropic: Base URL + مفتاح</span></div></div>
     <div class="card"><div class="card-h"><h3>ElevenLabs</h3><div class="end">${chip('لكل براند', 'vi')}</div></div><div class="flex wrap">${chip('أصوات', '', false)}</div>
       <p class="muted xs mt12">مفاتيح ElevenLabs تُضاف لكل براند على حدة (100+ مفتاح) مع تدوير حسب الرصيد.</p>
       <div class="flex mt16"><button class="btn ghost sm" data-go="keys">${ic('keys')}إدارة المفاتيح</button></div></div>
   </div>`);
   $$('[data-go]', v).forEach((x) => (x.onclick = () => go(x.dataset.go)));
+  $('#addCustom', v).onclick = customModal;
   $$('[data-pc]', v).forEach((x) => (x.onclick = () => connectModal(list.find((p) => p.id === x.dataset.pc))));
   $$('[data-pt]', v).forEach((x) => (x.onclick = () => busy(x, async () => {
     try { const r = await api(`/api/providers/${x.dataset.pt}/test`, { method: 'POST', body: {} }); toast(r.status === 'active' ? `${r.name} يعمل · ${r.ms}ms` : `${r.name}: ${r.error || r.status}`, r.status !== 'active' && r.status !== 'saved'); await loadProviders(); drawProviders(); } catch (err) { toast(err.message, true); }
@@ -980,11 +1022,10 @@ function drawProviders() {
 async function saveAssign(kind, provider, model) {
   try { const r = await api('/api/providers/settings', { method: 'PUT', body: { [kind]: { provider, model } } }); S.prov.settings = r.settings; S.ov = null; drawProviders(); toast('تم الحفظ'); } catch (err) { toast(err.message, true); }
 }
-function modelModal(kind) {
+async function modelModal(kind) {
   const cur = S.prov.settings[kind];
   const p = S.prov.providers.find((x) => x.id === cur.provider);
-  const re = kind === 'image' ? /image|imagen|dall/ : kind === 'video' ? /veo|video/ : /^(?!.*(image|imagen|dall|tts|whisper|embed|audio|realtime|transcribe|moderation|veo|aqa)).*/;
-  const models = (p.models || []).filter((m) => re.test(m));
+  const models = ((await loadModels(kind).catch(() => ({ models: [] }))).models || []).filter((m) => m.provider === p.id).map((m) => m.model);
   modal(`<h2>نموذج ${KIND[kind]} · ${esc(p.name)}</h2><p class="muted sm mt8">اختر من النماذج المتاحة في حسابك أو اكتب اسم النموذج.</p>
     <label class="lbl">اسم النموذج</label><input class="field ltr" id="mname" value="${esc(cur.model)}" style="text-align:left">
     ${models.length ? `<div class="opts mt12" style="max-height:220px;overflow:auto">${models.slice(0, 80).map((m) => `<button class="opt ltr ${m === cur.model ? 'on' : ''}" data-m="${esc(m)}">${esc(m)}</button>`).join('')}</div>` : ''}
@@ -1007,6 +1048,29 @@ function connectModal(p) {
     });
     $('#pcs').onclick = save;
     $$('[data-f]', m).forEach((i) => (i.onkeydown = (e) => e.key === 'Enter' && save()));
+  });
+}
+
+function customModal() {
+  modal(`<h2>مزوّد مخصص</h2><p class="muted sm mt8">أي خدمة توفّر API متوافقاً مع OpenAI (<span class="ltr">/v1/chat/completions</span>) أو Anthropic (<span class="ltr">/v1/messages</span>). المفتاح يُشفّر ولا يظهر مرة أخرى.</p>
+    <label class="lbl">الاسم</label><input class="field" id="cn" maxlength="60" placeholder="مثلاً: ALFIA LLM">
+    <label class="lbl">Base URL</label><input class="field ltr" id="cu" placeholder="https://example.com/v1" style="text-align:left">
+    <p class="hint">الرابط الذي ينتهي بـ <span class="ltr">/v1</span>، بدون <span class="ltr">/chat/completions</span>.</p>
+    <span class="lbl">نوع التوافق</span><div class="opts" data-opts="compat"><button class="opt on" data-k="openai">OpenAI-compatible</button><button class="opt" data-k="anthropic">Anthropic-compatible</button></div>
+    <span class="lbl">يُستعمل لـ</span><div class="opts" data-opts="kinds"><button class="opt on" data-k="text">كتابة وتحليل</button><button class="opt" data-k="image">صور</button></div>
+    <label class="lbl">API Key</label><input class="field mono ltr" id="ck" type="password" autocomplete="off" style="text-align:left">
+    <label class="lbl">اسم نموذج افتراضي (اختياري)</label><input class="field ltr" id="cm" placeholder="يُجلب تلقائياً إن كانت الخدمة تعرض /models" style="text-align:left">
+    <div class="foot"><button class="btn ghost" data-x>إلغاء</button><button class="btn primary" id="cs" data-busy="يختبر…">${ic('plug')}ربط واختبار</button></div>`, (m) => {
+    const st = { compat: 'openai', kinds: ['text'] };
+    bindOpts(m, st, ['kinds']);
+    $('[data-x]', m).onclick = closeModal;
+    $('#cs').onclick = () => busy($('#cs'), async () => {
+      try {
+        const r = await api('/api/providers/custom', { method: 'POST', body: { name: $('#cn').value, baseUrl: $('#cu').value, apiKey: $('#ck').value.trim(), compat: st.compat, kinds: st.kinds, model: $('#cm').value } });
+        closeModal(); toast(r.models.length ? `تم ربط ${r.name} · ${r.models.length} نموذج` : `تم حفظ ${r.name}. اكتب اسم النموذج من زر "النموذج".`);
+        await loadProviders(); if (S.page === 'providers') drawProviders();
+      } catch (err) { toast(err.message, true); }
+    });
   });
 }
 
@@ -1055,12 +1119,12 @@ async function drawCreate() {
   const b = S.brand;
   if (f.productId && !b.products.some((p) => p.id === f.productId)) f.productId = '';
   const prod = b.products.find((p) => p.id === f.productId);
-  const st = S.prov.settings.text;
+  await loadModels('text').catch(() => null);
   let occ = [];
   try { occ = (await api(`/api/brands/${b.id}/occasions`)).occasions; } catch { /* optional */ }
   if (!S.batches) { try { S.batches = (await api(`/api/brands/${b.id}/batches`)).batches; } catch { S.batches = []; } }
   const v = view(`<div class="grid c12">
-    <div class="card s8"><div class="card-h"><h3>ماذا نكتب اليوم؟</h3><div class="end">${chip(`${st.provider} · ${st.model}`, '', false)}</div></div>
+    <div class="card s8"><div class="card-h"><h3>ماذا نكتب اليوم؟</h3><div class="end">${pickerHTML('text')}</div></div>
       <span class="lbl" style="margin-top:0">المنتج أو الخدمة</span>
       <div class="sel"><button class="sel-btn" id="cprod" data-menu><span class="lab">${prod ? esc(prod.name) : b.products.length ? 'البراند كاملاً (بدون منتج محدد)' : 'البراند كاملاً · أضف منتجات من عقل البراند'}</span>${ic('chev')}</button></div>
       <span class="lbl">المنصات</span>${optsRow('platforms', o.PLATFORMS, f.platforms, true)}
@@ -1086,6 +1150,7 @@ async function drawCreate() {
       </div>
     </div></div>`);
   bindOpts(v, f, ['platforms']);
+  bindPicker(v, () => drawCreate());
   $$('[data-go]', v).forEach((x) => (x.onclick = () => go(x.dataset.go)));
   $$('[data-tab]', v).forEach((x) => (x.onclick = () => { S.ctab = x.dataset.tab; PAGES.create(); }));
   $$('[data-bt]', v).forEach((x) => (x.onclick = () => openBatch(x.dataset.bt)));
@@ -1097,7 +1162,7 @@ async function drawCreate() {
     { divider: true }, { label: 'إضافة منتج', icon: 'plus', onClick: () => { S.brainTab = 'products'; go('brain'); } }], { search: b.products.length > 6 });
   $('#cgo', v).onclick = (e) => busy(e.currentTarget, async () => {
     try {
-      const batch = await api(`/api/brands/${b.id}/batches`, { method: 'POST', body: f });
+      const batch = await api(`/api/brands/${b.id}/batches`, { method: 'POST', body: { ...f, ai: aiOf('text') } });
       S.batches = null; S.ov = null;
       S.batch = batch; S.ctab = 'results';
       PAGES.create();
@@ -1173,12 +1238,12 @@ function drawBatch() {
         <div class="foot"><button class="btn ghost" data-x>إلغاء</button><button class="btn primary" id="rs" data-busy="يعيد الكتابة…">${ic('refresh')}إعادة</button></div>`, (m) => {
         $('[data-x]', m).onclick = closeModal;
         $$('[data-q]', m).forEach((q) => (q.onclick = () => { const t = $('#rf'); t.value = (t.value ? t.value + '، ' : '') + q.dataset.q; }));
-        $('#rs').onclick = () => busy($('#rs'), async () => { try { const n = await api(url(it) + '/rewrite', { method: 'POST', body: { feedback: $('#rf').value } }); closeModal(); replace(n); toast('تمت إعادة الكتابة'); } catch (err) { toast(err.message, true); } });
+        $('#rs').onclick = () => busy($('#rs'), async () => { try { const n = await api(url(it) + '/rewrite', { method: 'POST', body: { feedback: $('#rf').value, ai: aiOf('text') } }); closeModal(); replace(n); toast('تمت إعادة الكتابة'); } catch (err) { toast(err.message, true); } });
       });
       if (a === 'image') return busy(btn, async () => {
         try {
           const aspect = ['tiktok', 'snapchat'].includes(it.platform) || ['reel', 'story', 'ugc'].includes(it.type) ? '9:16' : it.platform === 'instagram' ? '4:5' : it.platform === 'x' || it.platform === 'youtube' || it.platform === 'linkedin' ? '16:9' : '1:1';
-          const img = await api(`/api/brands/${S.brand.id}/images`, { method: 'POST', body: { prompt: it.imagePrompt || it.visual, aspect, style: 'none', useColors: true, from: { batch: bt.id, item: it.id } } });
+          const img = await api(`/api/brands/${S.brand.id}/images`, { method: 'POST', body: { prompt: it.imagePrompt || it.visual, aspect, style: 'none', useColors: true, from: { batch: bt.id, item: it.id }, ai: aiOf('image') } });
           S.images = null;
           replace(await api(url(it), { method: 'PATCH', body: { image: { url: img.url, id: img.id } } }));
           toast('تم تصميم الصورة');
@@ -1225,6 +1290,7 @@ async function drawPlan() {
       <div class="cal mt16">${['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'].map((x) => `<div class="cw">${x}</div>`).join('')}${cells.join('')}</div>
       <p class="hint mt12">اضغط على أي فكرة لتحويلها إلى محتوى جاهز.</p></div>`;
   }
+  await loadModels('text').catch(() => null);
   const v = view(`<div class="card"><div class="card-h"><h3>خطة شهرية بالذكاء الاصطناعي</h3>${S.planMonths.length ? `<div class="end"><span class="muted xs">خطط محفوظة:</span>${S.planMonths.map((x) => `<button class="btn ${plan?.id === x ? 'primary' : 'grey'} sm" data-pm="${x}">${x}</button>`).join('')}</div>` : ''}</div>
     <div class="grid c2" style="gap:12px">
       <div><span class="lbl" style="margin-top:0">الشهر</span><div class="opts" data-opts="month">${months.map(([k, l]) => `<button class="opt ${pf.month === k ? 'on' : ''}" data-k="${k}">${esc(l)}</button>`).join('')}</div></div>
@@ -1232,13 +1298,14 @@ async function drawPlan() {
     </div>
     <span class="lbl">المنصات</span>${optsRow('platforms', o.PLATFORMS, pf.platforms, true)}
     <div class="grid c2" style="gap:12px"><div><span class="lbl">الهدف</span>${optsRow('goal', o.GOALS, pf.goal)}</div><div><span class="lbl">اللغة</span>${optsRow('dialect', o.DIALECTS, pf.dialect)}</div></div>
-    <div class="flex mt16" style="justify-content:flex-end"><button class="btn primary" id="pgo" data-busy="يخطط… قد يستغرق دقيقة">${ic('calendar')}${plan && plan.id === pf.month ? 'إعادة بناء الخطة' : 'بناء الخطة'}</button></div>
+    <div class="flex mt16"><div style="min-width:260px">${pickerHTML('text')}</div><span class="grow"></span><button class="btn primary" id="pgo" data-busy="يخطط… قد يستغرق دقيقة">${ic('calendar')}${plan && plan.id === pf.month ? 'إعادة بناء الخطة' : 'بناء الخطة'}</button></div>
   </div>${cal}`);
   bindOpts(v, pf, ['platforms']);
+  bindPicker(v, () => drawPlan());
   $$('[data-opts="perWeek"] .opt', v).forEach((x) => x.addEventListener('click', () => (pf.perWeek = Number(x.dataset.k))));
   $$('[data-pm]', v).forEach((x) => (x.onclick = () => { S.plan = { id: x.dataset.pm }; drawPlan(); }));
   $('#pgo', v).onclick = (e) => busy(e.currentTarget, async () => {
-    try { S.plan = await api(`/api/brands/${S.brand.id}/plan`, { method: 'POST', body: pf }); S.ov = null; drawPlan(); toast(`خطة ${S.plan.days.length} منشور جاهزة`); } catch (err) { toast(err.message, true); }
+    try { S.plan = await api(`/api/brands/${S.brand.id}/plan`, { method: 'POST', body: { ...pf, ai: aiOf('text') } }); S.ov = null; drawPlan(); toast(`خطة ${S.plan.days.length} منشور جاهزة`); } catch (err) { toast(err.message, true); }
   });
   $$('[data-pd]', v).forEach((x) => (x.onclick = () => {
     const d = plan.days.find((y) => y.id === x.dataset.pd);
@@ -1260,9 +1327,12 @@ async function drawPlan() {
 const STYLE_L = { none: 'بدون', photo: 'تصوير منتج', studio: 'استوديو', lifestyle: 'لايف ستايل', flat: 'رسم مسطّح', '3d': 'ثلاثي الأبعاد', minimal: 'مينيمال' };
 PAGES.studio = async () => {
   if (needBrand()) return header();
-  header();
+  header(pills('stab', [['image', 'الصور'], ['video', 'الفيديو']], S.stab));
+  requestAnimationFrame(() => placePills($('#head')));
   if (!S.prov) await loadProviders().catch(() => null);
-  if (!S.prov?.settings?.image) {
+  if (S.stab === 'video') return drawVideo();
+  await loadModels('image').catch(() => null);
+  if (!aiOf('image')) {
     view(`<div class="empty"><span class="ic">${ic('studio')}</span><h3>اربط مزوّد صور</h3><p>استوديو الصور يعمل بمفتاحك: Gemini (Nano Banana) أو OpenAI (GPT Image) أو xAI (Grok).</p><button class="btn primary" id="gp">${ic('plug')}المفاتيح والمزوّدون</button></div>`);
     $('#gp').onclick = () => go('providers');
     return;
@@ -1273,9 +1343,10 @@ PAGES.studio = async () => {
 function drawStudio() {
   const g = S.img;
   const b = S.brand;
-  const st = S.prov.settings.image;
+  const st = aiOf('image');
   const v = view(`<div class="grid c12">
-    <div class="card s5"><div class="card-h"><h3>صورة جديدة</h3><div class="end">${chip(`${st.provider} · ${st.model}`, '', false)}</div></div>
+    <div class="card s5"><div class="card-h"><h3>صورة جديدة</h3></div>
+      <span class="lbl" style="margin-top:0">${KIND_L.image}</span>${pickerHTML('image')}<div class="mt12"></div>
       <textarea class="field" id="ip" rows="5" maxlength="2000" placeholder="صف الصورة: المنتج، المكان، الأشخاص، الإضاءة، الإحساس… مثلاً: زجاجة زيت أرغان على طاولة خشبية في رياض مغربي، ضوء صباحي دافئ">${esc(g.prompt)}</textarea>
       <span class="lbl">المقاس</span>${pills('aspect', [['1:1', '1:1'], ['4:5', '4:5'], ['9:16', '9:16'], ['16:9', '16:9']], g.aspect)}
       <span class="lbl">الأسلوب</span><div class="opts" data-opts="style">${Object.entries(STYLE_L).map(([k, l]) => `<button class="opt ${g.style === k ? 'on' : ''}" data-k="${k}">${l}</button>`).join('')}</div>
@@ -1296,19 +1367,37 @@ function drawStudio() {
       : `<div class="empty" style="padding:28px"><span class="ic">${ic('studio')}</span><h3>لا توجد صور بعد</h3><p>اكتب وصفاً واضغط توليد. يمكنك أيضاً تصميم صورة لأي منشور من صفحة النتائج.</p></div>`}
     </div></div>`);
   bindOpts(v, g);
+  bindPicker(v, () => drawStudio());
   $('#ip', v).oninput = (e) => (g.prompt = e.target.value);
   $('#itx', v).oninput = (e) => (g.text = e.target.value);
   $('#icol', v).onchange = (e) => (g.useColors = e.target.checked);
   $('#ilogo', v).onchange = (e) => (g.useLogo = e.target.checked);
   $('#igo', v).onclick = (e) => busy(e.currentTarget, async () => {
     if (!g.prompt.trim()) return toast('اكتب وصف الصورة', true);
-    try { const img = await api(`/api/brands/${b.id}/images`, { method: 'POST', body: g }); S.images = [img, ...S.images]; S.ov = null; drawStudio(); toast(`تم · ${(img.ms / 1000).toFixed(1)} ث`); } catch (err) { toast(err.message, true); }
+    try { const img = await api(`/api/brands/${b.id}/images`, { method: 'POST', body: { ...g, ai: aiOf('image') } }); S.images = [img, ...S.images]; S.ov = null; drawStudio(); toast(`تم · ${(img.ms / 1000).toFixed(1)} ث`); } catch (err) { toast(err.message, true); }
   });
   $$('[data-re]', v).forEach((x) => (x.onclick = () => { const im = S.images.find((y) => y.id === x.dataset.re); Object.assign(g, { prompt: im.prompt, aspect: im.aspect, style: im.style || 'none' }); drawStudio(); }));
   $$('[data-del]', v).forEach((x) => (x.onclick = async () => {
     if (!(await confirmBox('حذف الصورة؟', 'ستُحذف من المعرض والتخزين.', 'حذف', true))) return;
     try { await api(`/api/brands/${b.id}/images/${x.dataset.del}`, { method: 'DELETE' }); S.images = S.images.filter((y) => y.id !== x.dataset.del); drawStudio(); } catch (err) { toast(err.message, true); }
   }));
+}
+
+async function drawVideo() {
+  const data = await loadModels('video').catch(() => ({ models: [] }));
+  const groups = {};
+  for (const m of data.models) (groups[m.providerName] = groups[m.providerName] || []).push(m.model);
+  const v = view(`<div class="grid c12">
+    <div class="card s5"><div class="card-h"><h3>فيديو جديد</h3>${chip('المرحلة القادمة', 'vi')}</div>
+      <span class="lbl" style="margin-top:0">${KIND_L.video}</span>${pickerHTML('video')}
+      <label class="lbl">وصف الفيديو</label><textarea class="field" rows="4" disabled placeholder="توليد الفيديو يُفعَّل في المرحلة القادمة: نص ← فيديو، صورة ← فيديو، حركات كاميرا، إعلانات جاهزة."></textarea>
+      <div class="flex mt16" style="justify-content:flex-end"><button class="btn primary" disabled>${ic('play')}توليد الفيديو</button></div></div>
+    <div class="card s7"><div class="card-h"><h3>نماذج الفيديو المتاحة من مفاتيحك</h3><div class="end"><span class="muted xs">${data.models.length}</span></div></div>
+      ${data.models.length ? Object.entries(groups).map(([n, list]) => `<span class="lbl">${esc(n)}</span><div class="flex wrap">${list.map((m) => chip(m, '', false)).join('')}</div>`).join('')
+      : `<div class="empty" style="padding:28px"><span class="ic">${ic('plug')}</span><h3>لا توجد نماذج فيديو بعد</h3><p>اربط مفتاح Gemini (Veo) أو OpenAI (Sora) أو Kling أو Seedance أو Wan وستظهر نماذجها هنا تلقائياً.</p><button class="btn primary" data-go="providers">${ic('plug')}المفاتيح والمزوّدون</button></div>`}
+    </div></div>`);
+  bindPicker(v, () => drawVideo());
+  $$('[data-go]', v).forEach((x) => (x.onclick = () => go(x.dataset.go)));
 }
 
 // ---------- setup (database not connected yet) ----------
