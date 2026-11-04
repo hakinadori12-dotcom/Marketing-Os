@@ -153,6 +153,8 @@ const TITLES = {
 };
 const SOON = {
 };
+const PAGE_EN = { home: 'Dashboard', brands: 'Brands', brain: 'Brand Brain', voice: 'Voice', keys: 'Keys', api: 'API', create: 'Content', studio: 'Studio', providers: 'Providers', research: 'Market Research', approvals: 'Approvals', calendar: 'Calendar', insights: 'Insights' };
+const arrow = (cls = '') => `<span class="ca ${cls}" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M17 7 7 17M17 7H9M17 7v8"/></svg></span>`;
 const SRC = { confirmed: ['مؤكد', 'em'], extracted: ['مستخرج', 'am'], inferred: ['مستنتج', 'vi'] };
 const KSTAT = { active: ['نشط', 'em'], exhausted: ['انتهى الرصيد', 'am'], invalid: ['غير صالح', 'ro'], disabled: ['معطّل', ''], error: ['خطأ مؤقت', 'sk'] };
 const chip = (label, cls = '', dot = true) => `<span class="chip ${cls}">${dot ? '<span class="d"></span>' : ''}${esc(label)}</span>`;
@@ -271,13 +273,13 @@ addEventListener('resize', () => placePills());
 
 // ---------------- login ----------------
 function renderLogin() {
-  $('#root').innerHTML = `<div class="login"><form class="box" id="lf">
-    <div class="logo"><div class="logo-mark"><i></i></div><div><b>Marketing OS</b><small>نظام تشغيل التسويق</small></div></div>
+  $('#root').innerHTML = `<div class="login"><div class="login-hero" aria-hidden="true"><span class="tag">Marketing OS</span><div class="mega">نسوّق<br>ما <span class="mark">يتحرّك</span></div><span class="cross c1"></span><span class="cross c2"></span></div><form class="box" id="lf">
+    <div class="logo"><b class="wm">MOS<sup>®</sup></b><div><small class="eyebrow">Marketing OS</small><small>نظام تشغيل التسويق</small></div></div>
     <h1>تسجيل الدخول</h1><p class="muted sm">أدخل كلمة المرور التي وضعتها في Vercel (ADMIN_PASSWORD).</p>
     <label class="lbl" for="pw">كلمة المرور</label>
     <input class="field" id="pw" type="password" autocomplete="current-password" required>
     <p class="xs mt8" id="lerr" style="color:#E11D48" hidden></p>
-    <button class="btn primary mt16" style="width:100%" id="lbtn">دخول</button>
+    <button class="btn primary mt16" style="width:100%" id="lbtn">دخول ${arrow()}</button>
   </form></div>`;
   $('#pw').focus();
   $('#lf').onsubmit = (e) => {
@@ -303,16 +305,19 @@ function brandAvatar(b, cls = '') {
 function hexMix(hex, to, t) { const a = String(hex).replace('#', ''); const c = [0, 2, 4].map((i) => parseInt(a.slice(i, i + 2), 16)); const d = to === 'w' ? 255 : 0; return '#' + c.map((x) => Math.round(x + (d - x) * t).toString(16).padStart(2, '0')).join(''); }
 function applyBrandTheme() {
   const r = document.documentElement.style;
-  const c = (S.brand?.visual?.colors || []).find((x) => /^#[0-9a-f]{6}$/i.test(x) && lum(x) > 0.02 && lum(x) < 0.85);
+  // the most vivid brand colour becomes the accent (bright ones first: they carry black text best)
+  const sat = (hex) => { const h = hex.replace('#', ''); const c3 = [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16) / 255); return Math.max(...c3) - Math.min(...c3); };
+  const cols = (S.brand?.visual?.colors || []).filter((x) => /^#[0-9a-f]{6}$/i.test(x) && sat(x) > 0.18 && lum(x) < 0.9);
+  const c = cols.sort((x, y) => (sat(y) + (lum(y) > 0.25 ? 0.5 : 0)) - (sat(x) + (lum(x) > 0.25 ? 0.5 : 0)))[0];
   const on = store.get('mos-brandui') !== 'off';
   if (!c || !on) { ['--brand', '--brand-text', '--brand-soft', '--brand-2'].forEach((k) => r.removeProperty(k)); document.documentElement.classList.remove('branded'); return; }
   const dark = document.documentElement.dataset.theme === 'dark';
+  // the brand colour becomes the neon accent: it must stay bright enough for black text on top
   let main = c;
-  if (dark && lum(main) < 0.12) main = hexMix(main, 'w', 0.35);
-  if (!dark && lum(main) > 0.6) main = hexMix(main, 'b', 0.35);
+  for (let i = 0; i < 8 && lum(main) < 0.32; i++) main = hexMix(main, 'w', 0.18);
   const second = (S.brand.visual.colors || []).find((x) => x !== c && /^#[0-9a-f]{6}$/i.test(x)) || hexMix(main, 'w', 0.4);
   r.setProperty('--brand', main);
-  r.setProperty('--brand-text', onColor(main));
+  r.setProperty('--brand-text', lum(main) > 0.28 ? '#0A0A0A' : '#FFFFFF');
   r.setProperty('--brand-soft', dark ? hexMix(main, 'b', 0.78) : hexMix(main, 'w', 0.9));
   r.setProperty('--brand-2', second);
   document.documentElement.classList.add('branded');
@@ -323,7 +328,7 @@ function renderShell() {
   const b = S.brand;
   $('#root').innerHTML = `<div class="app">
     <aside class="side" id="side">
-      <div class="logo"><div class="logo-mark"><i></i></div><div><b>Marketing OS</b><small>نظام تشغيل التسويق</small></div></div>
+      <div class="logo"><b class="wm">MOS<sup>®</sup></b><div><small class="eyebrow">Marketing OS</small><small>نظام تشغيل التسويق</small></div></div>
       <button class="brand-btn" id="brandBtn" data-menu>${brandAvatar(b)}<span class="grow">${b ? `<b>${esc(b.name)}</b><small>البراند النشط</small>` : '<b>لا يوجد براند</b><small>أنشئ أول براند</small>'}</span>${ic('chev')}</button>
       <nav class="nav" id="nav">${NAV.map(([k, l, phase]) => k === 'g' ? `<div class="grp eyebrow">${l}</div>` :
         `<a data-p="${k}" tabindex="0" class="${S.page === k ? 'on' : ''}">${ic(k)}${esc(l)}${phase ? `<span class="soon">م${phase}</span>` : ''}</a>`).join('')}</nav>
@@ -366,7 +371,7 @@ async function setBrand(id, { silent = false } = {}) {
 function header(extra = '') {
   const [t, sub] = TITLES[S.page] || ['', ''];
   $('#head').innerHTML = `<button class="btn grey icon menu-btn" id="mb" aria-label="القائمة">${ic('menu')}</button>
-    <div class="grow"><h1>${esc(t)}</h1><p>${esc(sub)}</p></div><div class="end">${extra}</div>`;
+    <div class="grow"><span class="tag">Marketing OS · ${esc(PAGE_EN[S.page] || '')}</span><h1>${(() => { const w = String(t).split(' '); const last = w.pop(); return `${esc(w.join(' '))} <span class="mark">${esc(last)}</span>`; })()}</h1><p>${esc(sub)}</p></div><div class="end">${extra}</div>`;
   $('#mb').onclick = () => toggleSide(true);
 }
 
@@ -462,21 +467,30 @@ PAGES.home = async () => {
   const series = ov.usage.days.map((d) => d.content + d.image + d.tts);
   const maxDay = Math.max(1, ...series);
   view(`
-  <div class="card outer mb16"><div class="banner"><div class="glow"></div>
-    <span class="eyebrow">${b ? 'Active brand' : 'Welcome'}</span>
-    <h2>${b ? `${esc(b.name)} <span>· جاهزية ${ready.score}%</span>` : 'مرحباً بك في <span>Marketing OS</span>'}</h2>
-    <p>${b ? 'عقل براند مكتمل + مفتاحك الخاص = محتوى جاهز للنشر، صور إعلانية، تعليق صوتي، وخطة شهرية.' : 'ابدأ بإنشاء أول براند في محفظتك. النظام سيحلّل موقعه ويبني عقله.'}</p>
-    ${b ? `<div class="steps">${steps.map(([l, ok], i) => `<span class="${ok ? 'done' : i === firstOpen ? 'now' : ''}">${ok ? '✓ ' : ''}${l}</span>`).join('')}</div>` : ''}
-  </div>
-  <div class="entity-foot">${b ? (b.gate1?.approved ? chip('بوابة 1 معتمدة', 'em') : chip('بوابة 1 بانتظار موافقتك', 'am')) : ''}${ov.providers.text ? chip(`الكتابة: ${ov.providers.text.name || ov.providers.text.provider}`, '', false) : chip('لا يوجد مفتاح AI', 'am')}<span class="grow"></span>
-    ${b ? `<button class="btn ghost sm" data-go="studio">الاستوديو</button><button class="btn primary sm" data-go="${target}">${label}</button>` : `<button class="btn primary sm" id="hb2">${ic('plus')}براند جديد</button>`}</div></div>
+  <section class="hero mb16">
+    <div class="hero-copy">
+      <span class="tag">${b ? 'Active brand · ' + esc(b.name) : 'Welcome to Marketing OS'}</span>
+      <h2 class="mega">${b ? `نسوّق <span class="o">${arrow('lg')}</span> لـ<br><span class="mark">${esc(b.name)}</span>` : `نبني براندات <span class="mark">تتحرّك</span>`}</h2>
+      <p class="lead">${b ? 'عقل براند مكتمل + مفاتيحك الخاصة = محتوى جاهز للنشر، تصاميم بخط براندك، فيديو، تعليق صوتي، وخطة شهرية.' : 'ابدأ بإنشاء أول براند. النظام يقرأ موقعه، يفهم ما يبيعه، ويبني عقله تلقائياً.'}</p>
+      <div class="flex wrap mt16" style="gap:14px">${b ? `<button class="linkcta" data-go="${target}"><span>${label}</span>${arrow()}</button><button class="btn ghost sm" data-go="studio">الاستوديو</button>` : `<button class="linkcta" id="hb2"><span>براند جديد</span>${arrow()}</button>`}</div>
+      ${b ? `<div class="steps mt16">${steps.map(([l, ok], i) => `<span class="${ok ? 'done' : i === firstOpen ? 'now' : ''}">${ok ? '✓ ' : ''}${l}</span>`).join('')}</div>` : ''}
+    </div>
+    <div class="hero-art" aria-hidden="true">
+      <div class="blob b1"></div><div class="blob b2"></div><div class="blob b3"></div>
+      <svg class="globe" viewBox="0 0 100 100"><circle cx="50" cy="50" r="46"/><ellipse cx="50" cy="50" rx="20" ry="46"/><ellipse cx="50" cy="50" rx="38" ry="46"/><path d="M4 50h92M10 28h80M10 72h80"/></svg>
+      <span class="cross c1"></span><span class="cross c2"></span>
+      <div class="orb"><svg viewBox="0 0 100 100"><defs><path id="orbpath" d="M50 50m-36 0a36 36 0 1 1 72 0a36 36 0 1 1-72 0"/></defs><text><textPath href="#orbpath">MARKETING OS · BRAND BRAIN · STUDIO · </textPath></text></svg>${arrow('dark')}</div>
+      ${b ? `<div class="counter"><b>${String(Math.max(1, steps.filter((x) => x[1]).length)).padStart(2, '0')}</b><i></i><span>${String(steps.length).padStart(2, '0')}</span></div>` : ''}
+    </div>
+  </section>
+  <div class="flex wrap mb16" style="gap:8px">${b ? (b.gate1?.approved ? chip('بوابة 1 معتمدة', 'em') : chip('بوابة 1 بانتظار موافقتك', 'am')) : ''}${ov.providers.text ? chip(`الكتابة: ${ov.providers.text.name || ov.providers.text.provider}`, '', false) : chip('لا يوجد مفتاح AI', 'ro')}</div>
 
-  <div class="grid c4 mb16">
-    ${[['create', 'دفعات محتوى', fmt(ov.usage.content), `${fmt(ov.usage.plan)} خطة شهرية · 14 يوم`],
-       ['studio', 'صور مولّدة', fmt(ov.usage.image), 'آخر 14 يوماً'],
+  <div class="statrow mb16">
+    ${[['create', 'دفعات محتوى', fmt(ov.usage.content), `${fmt(ov.usage.plan)} خطة شهرية`],
+       ['studio', 'تصاميم وصور', fmt(ov.usage.image), 'آخر 14 يوماً'],
        ['voice', 'تعليقات صوتية', fmt(ov.usage.tts), `${short(ov.usage.chars)} حرف`],
-       ['plug', 'مزوّدون مربوطون', fmt(ov.providers.connected), `${fmt(ov.keys.active)} مفتاح ElevenLabs نشط`]]
-      .map(([i, l, n, d], ix) => `<div class="card stat ${ix === 0 ? 'feature' : ''}"><div class="flex"><span class="ic">${ic(i)}</span><span class="sec sm">${l}</span></div><div class="num">${n}</div><span class="muted xs">${d}</span></div>`).join('')}
+       ['providers', 'مزوّدون مربوطون', fmt(ov.providers.connected), `${fmt(ov.keys.active)} مفتاح ElevenLabs`]]
+      .map(([pg, l, n, d]) => `<button class="st" data-go="${pg}"><b>${n}${Number(String(n).replace(/\D/g, '')) > 0 ? '<sup>+</sup>' : ''}</b><span>${l}</span><small>${d}</small></button>`).join('')}
   </div>
 
   <div class="grid c12">
@@ -978,7 +992,7 @@ PAGES.voice = async () => {
   }
   drawVoice({ loading: !S.voices, pool: k.summary });
   try {
-    if (!S.voices) { const vr = await api(`/api/brands/${id}/voices`); S.voices = vr.voices; if (vr.note) toast(`تعذّر جلب أصوات حسابك (${vr.note}). تظهر الأصوات الجاهزة من ElevenLabs.`, true); }
+    if (!S.voices) { const vr = await api(`/api/brands/${id}/voices`); S.voices = vr.voices; S.vplan = vr.plan; if (vr.note) toast(`تعذّر جلب أصوات حسابك (${vr.note}). تظهر الأصوات الجاهزة من ElevenLabs.`, true); }
     if (!S.audio) S.audio = (await api(`/api/brands/${id}/audio`)).items;
   } catch (e) { toast(e.message, true); S.voices = S.voices || []; S.audio = S.audio || []; }
   if (S.page === 'voice' && S.brand?.id === id) drawVoice({ pool: k.summary });
@@ -1007,8 +1021,11 @@ function drawVoice({ loading = false, pool } = {}) {
   const q = S.voiceQuery.trim().toLowerCase();
   const isAr = (x) => /^(ar|arabic)$/i.test(x.labels?.language || '') || /arab|saudi|gulf|egypt|morocc|emirat|عرب/i.test(Object.values(x.labels || {}).join(' ') + x.name);
   const voices = (S.voices || []).filter((x) => !q || (x.name + ' ' + Object.values(x.labels || {}).join(' ') + ' ' + voiceTags(x).join(' ')).toLowerCase().includes(q))
-    .sort((a, b2) => (S.vrec?.[a.id]?.rank || 9) - (S.vrec?.[b2.id]?.rank || 9) || Number(isAr(b2)) - Number(isAr(a)));
+    .filter((x) => !S.vfree || x.access === 'free')
+    .sort((a, b2) => (S.vrec?.[a.id]?.rank || 9) - (S.vrec?.[b2.id]?.rank || 9) || (S.vplan === 'free' ? Number(b2.access === 'free') - Number(a.access === 'free') : 0) || Number(isAr(b2)) - Number(isAr(a)));
   if (S.voices && !S.voices.some((x) => x.id === S.voiceId)) S.voiceId = S.voices[0]?.id || '';
+  if (S.vplan === 'free' && S.voices?.find((x) => x.id === S.voiceId)?.access === 'paid') S.voiceId = S.voices.find((x) => x.access === 'free')?.id || S.voiceId;
+  const PLAN = { free: ['حسابك مجاني', 'am'], paid: ['حساب مدفوع', 'em'], unknown: ['', ''] }[S.vplan || 'unknown'];
   const model = S.models.find((m) => m.id === t.modelId) || S.models[0];
   const slider = (key, label, min, max, step, val, fmtv) => `<div><div class="flex"><span class="sm sec grow">${label}</span><b class="xs tnum" id="sv-${key}">${fmtv(val)}</b></div><input type="range" data-sl="${key}" min="${min}" max="${max}" step="${step}" value="${val}"></div>`;
   const v = view(`<div class="grid c12">
@@ -1024,11 +1041,12 @@ function drawVoice({ loading = false, pool } = {}) {
           ${slider('speed', 'السرعة', 0.7, 1.2, 0.05, t.speed, (x) => Number(x).toFixed(2) + '×')}
         </div></div>
       </div>
-      <div class="flex mt16"><span class="lbl grow" style="margin:0">الصوت</span><button class="btn ghost sm" id="vrec" data-busy="يختار…">${ic('sparkle')}اقترح لي الأنسب</button><div class="search ${S.voiceQuery ? 'open' : ''}" id="vs"><button aria-label="بحث">${ic('search')}</button><input placeholder="ابحث في الأصوات" value="${esc(S.voiceQuery)}"></div></div>
+      ${S.vplan === 'free' ? `<div class="inset sm mt16"><b>حسابك في ElevenLabs مجاني:</b> تعمل فقط الأصوات التي عليها «مجاني». الأصوات «المدفوعة» (أصوات المكتبة) تحتاج اشتراكاً. «اقترح لي الأنسب» يختار لك من المجانية فقط.</div>` : ''}
+      <div class="flex mt16"><span class="lbl grow" style="margin:0">الصوت ${PLAN[0] ? chip(PLAN[0], PLAN[1], false) : ''}</span><label class="flex xs" style="cursor:pointer"><input type="checkbox" class="check" id="vfree" ${S.vfree ? 'checked' : ''}>المجانية فقط</label><button class="btn ghost sm" id="vrec" data-busy="يختار…">${ic('sparkle')}اقترح لي الأنسب</button><div class="search ${S.voiceQuery ? 'open' : ''}" id="vs"><button aria-label="بحث">${ic('search')}</button><input placeholder="ابحث في الأصوات" value="${esc(S.voiceQuery)}"></div></div>
       <div class="voice-list mt8" id="vl">${loading ? '<div class="skel" style="height:46px"></div><div class="skel" style="height:46px"></div><div class="skel" style="height:46px"></div>' :
-        voices.length ? voices.map((x) => `<div class="voice ${x.id === S.voiceId ? 'on' : ''}" data-v="${x.id}" tabindex="0">
+        voices.length ? voices.map((x) => `<div class="voice ${x.id === S.voiceId ? 'on' : ''} ${S.vplan === 'free' && x.access === 'paid' ? 'locked' : ''}" data-v="${x.id}" tabindex="0" ${S.vplan === 'free' && x.access === 'paid' ? 'title="يحتاج اشتراكاً مدفوعاً في ElevenLabs"' : ''}>
           ${x.preview ? `<button class="play" data-pv="${x.id}" aria-label="استماع">${ic('play')}</button>` : '<span class="play" style="opacity:.3">' + ic('play') + '</span>'}
-          <div class="grow"><b class="sm">${esc(voiceName(x).name)}</b>${voiceName(x).desc ? ` <span class="xs sec">· ${esc(voiceName(x).desc)}</span>` : ''}${S.vrec?.[x.id] ? ` ${chip(`مقترح #${S.vrec[x.id].rank}`, 'em', false)}` : ''}<div class="muted xs">${esc(voiceTags(x).join(' · '))}</div>${S.vrec?.[x.id] ? `<div class="xs mt8" style="color:var(--accent)">${esc(S.vrec[x.id].why)}${S.vrec[x.id].settings ? ` · ${esc(S.vrec[x.id].settings)}` : ''}</div>` : ''}</div>
+          <div class="grow"><b class="sm">${esc(voiceName(x).name)}</b>${voiceName(x).desc ? ` <span class="xs sec">· ${esc(voiceName(x).desc)}</span>` : ''}${S.vrec?.[x.id] ? ` ${chip(`مقترح #${S.vrec[x.id].rank}`, 'em', false)}` : ''} ${x.access === 'paid' ? chip('مدفوع', S.vplan === 'free' ? 'ro' : '', false) : chip('مجاني', 'em', false)}<div class="muted xs">${esc(voiceTags(x).join(' · '))}</div>${S.vrec?.[x.id] ? `<div class="xs mt8" style="color:var(--accent)">${esc(S.vrec[x.id].why)}${S.vrec[x.id].settings ? ` · ${esc(S.vrec[x.id].settings)}` : ''}</div>` : ''}</div>
           ${x.id === S.voiceId ? ic('check') : ''}</div>`).join('') : '<p class="muted sm" style="padding:12px">لا توجد أصوات مطابقة</p>'}</div>
       <div class="flex mt16" style="justify-content:flex-end"><span class="muted xs grow" id="vcost">${t.text.length ? `سيستهلك حوالي ${fmt(t.text.length)} حرف من رصيد المفاتيح` : ''}</span><button class="btn primary" id="vgo" data-busy="يولّد…" ${loading ? 'disabled' : ''}>${ic('voice')}توليد الصوت</button></div>
     </div>
@@ -1044,9 +1062,10 @@ function drawVoice({ loading = false, pool } = {}) {
   const ta = $('#vt', v);
   ta.oninput = () => { t.text = ta.value; $('#vc').textContent = `${ta.value.length}/5000`; $('#vcost').textContent = ta.value.length ? `سيستهلك حوالي ${fmt(ta.value.length)} حرف من رصيد المفاتيح` : ''; };
   $$('[data-sl]', v).forEach((r) => (r.oninput = () => { const k = r.dataset.sl; t[k] = Number(r.value); $(`#sv-${k}`).textContent = k === 'speed' ? Number(r.value).toFixed(2) + '×' : Math.round(r.value * 100) + '%'; }));
+  $('#vfree', v) && ($('#vfree', v).onchange = (e) => { S.vfree = e.target.checked; drawVoice({ pool }); });
   $('#vrec', v).onclick = (e) => busy(e.currentTarget, async () => {
     try {
-      const r = await api(`/api/brands/${S.brand.id}/voices/recommend`, { method: 'POST', body: { text: t.text } });
+      const r = await api(`/api/brands/${S.brand.id}/voices/recommend`, { method: 'POST', body: { text: t.text, freeOnly: S.vfree || S.vplan === 'free' } });
       S.vrec = Object.fromEntries(r.picks.map((p, i) => [p.id, { ...p, rank: i + 1 }]));
       if (r.picks[0]) { S.voiceId = r.picks[0].id; store.set('mos-voice', S.voiceId); }
       drawVoice({ pool }); toast(r.picks.length ? 'اخترت لك أنسب 3 أصوات، الأول محدد الآن' : 'لم أجد صوتاً مناسباً', !r.picks.length);
@@ -1058,7 +1077,7 @@ function drawVoice({ loading = false, pool } = {}) {
   si.oninput = () => { S.voiceQuery = si.value; const pos = si.value.length; drawVoice({ pool }); const n = $('#vs input'); n.focus(); n.setSelectionRange(pos, pos); };
   si.onblur = () => { if (!si.value) sb.classList.remove('open'); };
   $$('[data-v]', v).forEach((el) => {
-    const pick = () => { S.voiceId = el.dataset.v; store.set('mos-voice', S.voiceId); $$('.voice', v).forEach((x) => x.classList.toggle('on', x === el)); };
+    const pick = () => { if (el.classList.contains('locked')) return toast('هذا الصوت مدفوع وحسابك مجاني. اختر صوتاً عليه «مجاني».', true); S.voiceId = el.dataset.v; store.set('mos-voice', S.voiceId); $$('.voice', v).forEach((x) => x.classList.toggle('on', x === el)); };
     el.onclick = (e) => { if (!e.target.closest('[data-pv]')) pick(); };
     el.onkeydown = (e) => { if (e.key === 'Enter') pick(); };
   });
@@ -2743,7 +2762,7 @@ PAGES.approvals = async () => {
 // ---------- setup (database not connected yet) ----------
 function renderSetup(st) {
   $('#root').innerHTML = `<div class="login"><div class="box" style="max-width:560px">
-    <div class="logo"><div class="logo-mark"><i></i></div><div><b>Marketing OS</b><small>إعداد أول مرة</small></div></div>
+    <div class="logo"><b class="wm">MOS<sup>®</sup></b><div><small class="eyebrow">Marketing OS</small><small>إعداد أول مرة</small></div></div>
     <h1>اربط قاعدة البيانات</h1><p class="muted sm">المنصة تعمل، لكن تحتاج مكاناً تحفظ فيه البراندات والمفاتيح والمحتوى. خطوة واحدة في Vercel (مجانية):</p>
     <div class="rows mt16">${[
       ['افتح مشروع marketing-os في Vercel ← تبويب Storage', st.db],

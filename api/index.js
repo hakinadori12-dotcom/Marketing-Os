@@ -509,19 +509,22 @@ module.exports = async (req, res) => {
 
       if (sub === 'voices/recommend' && method === 'POST') {
         const body = await readBody(req);
-        const list = await eleven.voices(id);
+        const all = await eleven.voices(id);
+        const free = all.plan === 'free' || body.freeOnly;
+        const list = free ? all.filter((x) => x.access === 'free') : all;
         const br = await brands.get(id);
         const txt = String(body.text || '').slice(0, 1500);
         const cand = list.slice(0, 120).map((x) => `${x.id} | ${x.name} | ${Object.entries(x.labels || {}).map(([k, v]) => `${k}: ${v}`).join(', ')}`).join('\n');
+        const freeNote = free ? '\nThe account is on the FREE plan: only these default voices can be used. If none speaks the script language natively, pick the most natural multilingual one (the model eleven_multilingual_v2 / v3 speaks Arabic with any voice) and say so.' : '';
         const out = await ai.json(`Pick the 3 best voices for this voice-over, best first. Consider language/accent of the script (Arabic dialect: Gulf, Saudi, Egyptian, Moroccan, MSA…), the brand tone and the use (ad, reel, explainer, story).
 Brand: ${br.name}. Tone: ${br.fields?.tone?.value || ''}. Audience: ${br.fields?.audience?.value || ''}. Market: ${br.fields?.market?.value || ''}.
 Script: ${txt || '(no script yet: recommend for the brand in general)'}
 Voices (id | name | labels):
-${cand}`, { type: 'object', properties: { picks: { type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, why: { type: 'string', description: 'one sentence in Arabic' }, settings: { type: 'string', description: 'short Arabic tip: stability/speed/style for this script' } }, required: ['id', 'why'] } } }, required: ['picks'] }, { kind: 'voice', brand: id });
+${cand}${freeNote}`, { type: 'object', properties: { picks: { type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, why: { type: 'string', description: 'one sentence in Arabic' }, settings: { type: 'string', description: 'short Arabic tip: stability/speed/style for this script' } }, required: ['id', 'why'] } } }, required: ['picks'] }, { kind: 'voice', brand: id });
         const picks = (out.json.picks || []).filter((p) => list.some((x) => x.id === p.id)).slice(0, 3).map((p) => ({ id: p.id, why: String(p.why || ''), settings: String(p.settings || '') }));
-        return send(res, 200, { picks });
+        return send(res, 200, { picks, plan: all.plan, freeOnly: free });
       }
-      if (sub === 'voices') { const list = await eleven.voices(id); return send(res, 200, { voices: list, note: list.note || null }); }
+      if (sub === 'voices') { const list = await eleven.voices(id); return send(res, 200, { voices: list, note: list.note || null, plan: list.plan || 'unknown' }); }
       if (sub === 'audio') return send(res, 200, { items: await eleven.history(id, Number(query.get('limit')) || 30) });
       if (sub === 'tts' && method === 'POST') {
         const body = await readBody(req);
