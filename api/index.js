@@ -9,6 +9,8 @@ const video = require('../lib/video');
 const schedule = require('../lib/schedule');
 const stt = require('../lib/stt');
 const assistant = require('../lib/assistant');
+const research = require('../lib/research');
+const identity = require('../lib/identity');
 const { sign, verify, safeEqual } = require('../lib/crypto');
 
 const COOKIE = 'mos_s';
@@ -371,6 +373,26 @@ module.exports = async (req, res) => {
       if (ve && method === 'POST') return send(res, 200, await video.edit(id, ve[1], await readBody(req)));
       const im = sub && sub.match(/^images\/([a-z0-9]+)$/);
       if (im && method === 'DELETE') { await content.deleteImage(id, im[1]); return send(res, 200, { ok: true }); }
+
+      if (sub === 'research' && method === 'GET') return send(res, 200, await research.load(id));
+      if (sub === 'research/discover' && method === 'POST') return send(res, 200, await research.discover(id, await readBody(req)));
+      if (sub === 'research/competitors' && method === 'POST') return send(res, 200, await research.add(id, await readBody(req)));
+      if (sub === 'research/cross' && method === 'POST') return send(res, 200, await research.cross(id));
+      if (sub === 'research/export' && method === 'GET') {
+        const f = await research.exportCSV(id, query.get('c'));
+        res.statusCode = 200;
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(f.name)}`);
+        return res.end(f.body);
+      }
+      const rc = sub && sub.match(/^research\/competitors\/([a-f0-9]+)(\/analyze)?$/);
+      if (rc && rc[2] && method === 'POST') return send(res, 200, await research.analyze(id, rc[1]));
+      if (rc && !rc[2] && method === 'DELETE') { await research.remove(id, rc[1]); return send(res, 200, { ok: true }); }
+      const ro = sub && sub.match(/^research\/opportunities\/([a-f0-9]+)$/);
+      if (ro && method === 'PATCH') return send(res, 200, await research.setOpportunity(id, ro[1], (await readBody(req)).status));
+      if (sub === 'identity/palettes' && method === 'POST') return send(res, 200, { palettes: await identity.palettes(id, await readBody(req)) });
+      if (sub === 'identity/logos' && method === 'POST') return send(res, 200, await identity.logos(id, await readBody(req)));
+      if (sub === 'identity/use-logo' && method === 'POST') return send(res, 200, await identity.useLogo(id, await readBody(req)));
 
       if (sub === 'schedule') {
         if (method === 'GET') return send(res, 200, { items: await schedule.list(id, query.get('month')) });

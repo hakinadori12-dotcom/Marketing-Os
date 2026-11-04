@@ -407,3 +407,18 @@ a,.link{color:inherit}
 .login{background:var(--navy)}
 .login .box{border:0}
 .av{border-radius:999px}
+
+/* identity + research */
+.propose{background:var(--accent-soft);border-color:transparent}
+.logo-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.logo-grid figure{margin:0;border:1px solid var(--border);border-radius:12px;padding:8px;display:flex;flex-direction:column;gap:8px;background:#fff}
+.logo-grid img{width:100%;aspect-ratio:1;object-fit:contain}
+.comp{display:flex;flex-direction:column}
+.comp p{flex:1}
+.src{color:var(--accent);text-decoration:none}
+.src:hover{text-decoration:underline}
+.opp.approved{box-shadow:inset 0 0 0 2px var(--t-em)}
+.opp.rejected{opacity:.55}
+details summary{cursor:pointer;color:var(--accent)}
+@media (max-width:760px){.logo-grid{grid-template-columns:1fr 1fr}}
+a.btn{text-decoration:none}
