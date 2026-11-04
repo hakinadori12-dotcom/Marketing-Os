@@ -103,7 +103,7 @@ const S = {
 const NAV = [
   ['g', 'Workspace'], ['home', 'لوحة القيادة'], ['brands', 'البراندات'], ['brain', 'عقل البراند'],
   ['g', 'Create'], ['create', 'إنشاء المحتوى'], ['studio', 'الاستوديو'], ['voice', 'التعليق الصوتي'],
-  ['g', 'Strategy'], ['research', 'بحث المنافسين', 4], ['approvals', 'الموافقات', 3], ['calendar', 'التقويم والنشر', 3], ['insights', 'الأداء والتعلّم', 4],
+  ['g', 'Strategy'], ['research', 'بحث المنافسين', 4], ['approvals', 'الموافقات', 3], ['calendar', 'التقويم والنشر'], ['insights', 'الأداء والتعلّم', 4],
   ['g', 'System'], ['providers', 'المفاتيح والمزوّدون'], ['keys', 'مفاتيح ElevenLabs'], ['api', 'لوحة الـ API'],
 ];
 const TITLES = {
@@ -118,13 +118,12 @@ const TITLES = {
   providers: ['المفاتيح والمزوّدون', 'اربط مفاتيحك الخاصة من كل شركة. أنت تدفع للمزوّد مباشرة'],
   research: ['بحث المنافسين', 'كل منافس في Google Sheet خاص به'],
   approvals: ['الموافقات', 'لا شيء يُنشر قبل موافقتك'],
-  calendar: ['التقويم والنشر', 'الجدولة على كل المنصات'],
+  calendar: ['التقويم والنشر', 'كل ما جدولته من منشورات وصور وفيديوهات'],
   insights: ['الأداء والتعلّم', 'النظام يتعلّم من كل منشور'],
 };
 const SOON = {
   research: [4, 'اكتشاف المنافسين، بحث معمّق لكل منافس (Brand DNA، السوشال، الإعلانات، Funnels) في Google Sheet خاص، ثم الفرص.'],
   approvals: [3, 'أربع بوابات: البراند، المفهوم، التصميم، النشر. البوابة الأولى تعمل الآن من صفحة عقل البراند.'],
-  calendar: [3, 'تقويم شهري، جدولة على إنستغرام وفيسبوك وتيك توك ولينكدإن، وحماية من النشر المكرر.'],
   insights: [4, 'الوصول والتفاعل والنقرات لكل منشور، ثم ماذا تعلّم النظام وما يوصي به للمحتوى القادم.'],
 };
 const SRC = { confirmed: ['مؤكد', 'em'], extracted: ['مستخرج', 'am'], inferred: ['مستنتج', 'vi'] };
@@ -184,6 +183,7 @@ function modal(html, onMount) {
   w.innerHTML = `<div class="modal" role="dialog" aria-modal="true">${html}</div>`;
   w.addEventListener('mousedown', (e) => { if (e.target === w) closeModal(); });
   document.body.append(w);
+  enhanceMics(w);
   onMount && onMount($('.modal', w));
   const f = $('input,textarea', w);
   f && setTimeout(() => f.focus(), 30);
@@ -259,13 +259,15 @@ function renderShell() {
     </aside>
     <div class="backdrop" id="bd" hidden></div>
     <main class="main"><header class="head" id="head"></header><div id="view"></div></main>
-  </div>`;
+  </div>
+  <button class="assist-fab" id="assist" title="المساعد الصوتي: قل ما تريد">${ic('voice')}<span>تكلّم</span></button>`;
   $('[data-pills="theme"]').style.display = 'flex';
   $$('[data-pills="theme"] button').forEach((x) => (x.style.flex = '1'));
   $$('#nav a').forEach((a) => { a.onclick = () => go(a.dataset.p); a.onkeydown = (e) => { if (e.key === 'Enter') go(a.dataset.p); }; });
   $('#brandBtn').onclick = (e) => brandMenu(e.currentTarget);
   $('#logout').onclick = async () => { await api('/api/logout', { method: 'POST' }).catch(() => {}); location.hash = ''; renderLogin(); };
   $('#bd').onclick = () => toggleSide(false);
+  $('#assist').onclick = assistantModal;
   placePills($('.side'));
 }
 function toggleSide(open) { $('#side')?.classList.toggle('open', open); const bd = $('#bd'); if (bd) bd.hidden = !open; }
@@ -308,6 +310,7 @@ addEventListener('popstate', () => S.authed && go(location.hash.slice(1) || 'hom
 function view(html) {
   const v = $('#view');
   v.innerHTML = `<div class="page">${html}</div>`;
+  enhanceMics(v);
   requestAnimationFrame(() => placePills(v));
   return v;
 }
@@ -553,7 +556,7 @@ function brainAnalyze() {
   return `<div class="grid c12"><div class="card s8"><div class="card-h"><h3>التحليل الذكي</h3><div class="end" style="min-width:240px">${pickerHTML('text')}</div></div>
     <p class="muted sm">النظام يقرأ موقعك و/أو ملاحظاتك ويقترح الحقول. كل اقتراح موسوم بمصدره، ولا يُحفظ شيء قبل موافقتك.</p>
     <label class="lbl">رابط الموقع</label><input class="field ltr" id="aurl" value="${esc(b.website)}" placeholder="example.com" style="text-align:left">
-    <label class="lbl">ملاحظات عن البراند (اختياري)</label><textarea class="field" id="atext" rows="4" placeholder="مثلاً: نبيع مستحضرات طبيعية بزيت الأرغان للنساء في المغرب، أسلوبنا دافئ وبالدارجة…"></textarea>
+    <label class="lbl">ملاحظات عن البراند (اختياري)</label><textarea class="field" id="atext" data-mic rows="4" placeholder="مثلاً: نبيع مستحضرات طبيعية بزيت الأرغان للنساء في المغرب، أسلوبنا دافئ وبالدارجة…"></textarea>
     <div class="flex mt16" style="justify-content:flex-end"><button class="btn primary" id="arun" data-busy="يحلّل…">${ic('sparkle')}تحليل</button></div>
     ${res}</div><div class="stack s4">${readinessCard()}</div></div>`;
 }
@@ -797,7 +800,7 @@ function drawVoice({ loading = false, pool } = {}) {
   const slider = (key, label, min, max, step, val, fmtv) => `<div><div class="flex"><span class="sm sec grow">${label}</span><b class="xs tnum" id="sv-${key}">${fmtv(val)}</b></div><input type="range" data-sl="${key}" min="${min}" max="${max}" step="${step}" value="${val}"></div>`;
   const v = view(`<div class="grid c12">
     <div class="card s7"><div class="card-h"><h3>تعليق صوتي</h3><div class="end">${chip('ElevenLabs', '', false)}${pool ? chip(`${pool.active} مفتاح · ${short(pool.remaining)} حرف`, 'em') : ''}</div></div>
-      <textarea class="field" id="vt" rows="5" maxlength="5000" placeholder="اكتب النص الذي تريد تحويله إلى صوت…">${esc(t.text)}</textarea>
+      <textarea class="field" id="vt" data-mic rows="5" maxlength="5000" placeholder="اكتب النص الذي تريد تحويله إلى صوت…">${esc(t.text)}</textarea>
       <div class="flex mt8"><span class="hint grow" style="margin:0">يمكنك الكتابة بالدارجة أو الفصحى أو الفرنسية.</span><span class="xs tnum muted" id="vc">${t.text.length}/5000</span></div>
       <div class="grid c2 mt16" style="gap:12px">
         <div><span class="lbl" style="margin-top:0">النموذج</span><div class="sel"><button class="sel-btn" id="vm" data-menu><span class="lab">${esc(model.name)} <span class="muted xs">· ${esc(model.note)}</span></span>${ic('chev')}</button></div></div>
@@ -1139,7 +1142,7 @@ async function drawCreate() {
         <div><span class="lbl">إطار الكتابة</span>${optsRow('framework', o.FRAMEWORKS, f.framework)}</div>
       </div>
       <span class="lbl">الفكرة أو ملاحظاتك (اختياري)</span>
-      <textarea class="field" id="cidea" rows="3" maxlength="1500" placeholder="مثلاً: عرض خاص 20% بمناسبة العودة للمدارس، ركّز على الجودة والتوصيل السريع…">${esc(f.idea)}</textarea>
+      <textarea class="field" id="cidea" data-mic rows="3" maxlength="1500" placeholder="مثلاً: عرض خاص 20% بمناسبة العودة للمدارس، ركّز على الجودة والتوصيل السريع…">${esc(f.idea)}</textarea>
       ${occ.length ? `<span class="lbl">مناسبات هذا الشهر</span><div class="opts" id="cocc">${occ.map((x) => `<button class="opt ${f.occasion === x.name ? 'on' : ''}" data-o="${esc(x.name)}">${esc(x.name)} <span class="muted xs ltr">${x.date.slice(5)}</span></button>`).join('')}</div>` : ''}
       <div class="flex mt16"><span class="sm sec">العدد</span><div class="pills" data-pills="count">${[1, 3, 5, 7, 10].map((n) => `<button data-v="${n}" class="${n === f.count ? 'on' : ''}">${n}</button>`).join('')}</div><span class="grow"></span>
         <button class="btn primary" id="cgo" data-busy="يكتب… قد يستغرق دقيقة">${ic('sparkle')}توليد المحتوى</button></div>
@@ -1217,6 +1220,7 @@ function drawBatch() {
         <button class="btn grey sm" data-a="copy">${ic('copy')}نسخ</button>
         <button class="btn grey sm" data-a="edit">${ic('edit')}تعديل</button>
         <button class="btn grey sm" data-a="rewrite">${ic('refresh')}إعادة بملاحظة</button>
+        <button class="btn grey sm" data-a="schedule">${ic('calendar')}جدولة</button>
         <button class="btn grey sm" data-a="image" data-busy="يصمم…">${ic('studio')}${it.image ? 'صورة أخرى' : 'صمّم الصورة'}</button>
         <span class="grow"></span>
         <button class="btn ${it.status === 'approved' ? 'ghost' : 'primary'} sm" data-a="approve">${ic('check')}${it.status === 'approved' ? 'إلغاء' : 'اعتماد'}</button>
@@ -1232,13 +1236,14 @@ function drawBatch() {
     const it = bt.items.find((x) => x.id === card.dataset.it);
     $$('[data-a]', card).forEach((btn) => (btn.onclick = () => {
       const a = btn.dataset.a;
+      if (a === 'schedule') return scheduleModal({ platforms: [it.platform], title: it.title, caption: itemText(it), media: it.image?.url ? { type: 'image', url: it.image.url } : null, source: { kind: 'post', batch: bt.id, item: it.id } });
       if (a === 'copy') return navigator.clipboard.writeText(itemText(it)).then(() => toast('تم النسخ'), () => toast('تعذر النسخ', true));
       if (a === 'approve') return busy(btn, async () => { try { replace(await api(url(it), { method: 'PATCH', body: { status: it.status === 'approved' ? 'draft' : 'approved' } })); } catch (err) { toast(err.message, true); } });
       if (a === 'edit') return modal(`<h2>تعديل النص</h2><label class="lbl">الخطّاف</label><input class="field" id="eh" value="${esc(it.hook)}"><label class="lbl">النص</label><textarea class="field" id="ec" rows="9">${esc(it.caption)}</textarea><label class="lbl">CTA</label><input class="field" id="ecta" value="${esc(it.cta)}"><label class="lbl">الهاشتاغات</label><input class="field" id="et" value="${esc(it.hashtags.join(' '))}"><div class="foot"><button class="btn ghost" data-x>إلغاء</button><button class="btn primary" id="es">حفظ</button></div>`, (m) => {
         $('[data-x]', m).onclick = closeModal;
         $('#es').onclick = () => busy($('#es'), async () => { try { replace(await api(url(it), { method: 'PATCH', body: { hook: $('#eh').value, caption: $('#ec').value, cta: $('#ecta').value, hashtags: $('#et').value.split(/[\s,]+/).map((x) => x.replace(/^#/, '')).filter(Boolean) } })); closeModal(); toast('تم الحفظ'); } catch (err) { toast(err.message, true); } });
       });
-      if (a === 'rewrite') return modal(`<h2>إعادة الكتابة</h2><p class="muted sm mt8">قل ما تريد تغييره، والنظام يعيد كتابة هذا العنصر فقط.</p><textarea class="field mt12" id="rf" rows="4" placeholder="مثلاً: اجعله أقصر وأكثر مرحاً، وأضف سؤالاً للجمهور"></textarea>
+      if (a === 'rewrite') return modal(`<h2>إعادة الكتابة</h2><p class="muted sm mt8">قل ما تريد تغييره، والنظام يعيد كتابة هذا العنصر فقط.</p><textarea class="field mt12" id="rf" data-mic rows="4" placeholder="مثلاً: اجعله أقصر وأكثر مرحاً، وأضف سؤالاً للجمهور"></textarea>
         <div class="opts mt12">${['أقصر', 'أكثر مرحاً', 'أكثر رسمية', 'ركّز على السعر', 'أضف قصة قصيرة', 'خطّاف أقوى'].map((x) => `<button class="opt" data-q="${x}">${x}</button>`).join('')}</div>
         <div class="foot"><button class="btn ghost" data-x>إلغاء</button><button class="btn primary" id="rs" data-busy="يعيد الكتابة…">${ic('refresh')}إعادة</button></div>`, (m) => {
         $('[data-x]', m).onclick = closeModal;
@@ -1283,13 +1288,13 @@ async function drawPlan() {
     for (const d of plan.days) (byDate[d.date] = byDate[d.date] || []).push(d);
     const occ = Object.fromEntries((plan.occasions || []).map((x) => [x.date, x.name]));
     const cells = [];
-    for (let i = 0; i < first; i++) cells.push('<div class="cd empty"></div>');
+    for (let i = 0; i < first; i++) cells.push('<div class="cd blank"></div>');
     for (let d = 1; d <= days; d++) {
       const key = `${plan.id}-${String(d).padStart(2, '0')}`;
       cells.push(`<div class="cd"><div class="flex"><b class="xs tnum">${d}</b>${occ[key] ? `<span class="occ" title="${esc(occ[key])}">${esc(occ[key])}</span>` : ''}</div>
         ${(byDate[key] || []).map((x) => `<button class="ci" data-pd="${x.id}" title="${esc(x.idea)}"><span class="pf sm">${PLAT_IC[x.platform] || '•'}</span><span>${esc(x.idea)}</span></button>`).join('')}</div>`);
     }
-    while (cells.length % 7) cells.push('<div class="cd empty"></div>');
+    while (cells.length % 7) cells.push('<div class="cd blank"></div>');
     cal = `<div class="card mt16"><div class="card-h"><h3>${esc(months.find((x) => x[0] === plan.id)?.[1] || plan.id)}</h3><div class="end"><span class="muted xs">${plan.days.length} منشور · ${esc(plan.model)}</span></div></div>
       <p class="sm">${esc(plan.strategy)}</p>${plan.pillars.length ? `<div class="flex wrap mt8">${plan.pillars.map((x) => chip(x, 'vi', false)).join('')}</div>` : ''}
       <div class="cal mt16">${['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'].map((x) => `<div class="cw">${x}</div>`).join('')}${cells.join('')}</div>
@@ -1351,7 +1356,7 @@ function drawStudio() {
   const v = view(`${studioTabs()}<div class="grid c12">
     <div class="card s5"><div class="card-h"><h3>صورة جديدة</h3></div>
       <span class="lbl" style="margin-top:0">${KIND_L.image}</span>${pickerHTML('image')}<div class="mt12"></div>
-      <textarea class="field" id="ip" rows="5" maxlength="2000" placeholder="صف الصورة: المنتج، المكان، الأشخاص، الإضاءة، الإحساس… مثلاً: زجاجة زيت أرغان على طاولة خشبية في رياض مغربي، ضوء صباحي دافئ">${esc(g.prompt)}</textarea>
+      <textarea class="field" id="ip" data-mic rows="5" maxlength="2000" placeholder="صف الصورة: المنتج، المكان، الأشخاص، الإضاءة، الإحساس… مثلاً: زجاجة زيت أرغان على طاولة خشبية في رياض مغربي، ضوء صباحي دافئ">${esc(g.prompt)}</textarea>
       <span class="lbl">المقاس</span>${pills('aspect', [['1:1', '1:1'], ['4:5', '4:5'], ['9:16', '9:16'], ['16:9', '16:9']], g.aspect)}
       <span class="lbl">الأسلوب</span><div class="opts" data-opts="style">${Object.entries(STYLE_L).map(([k, l]) => `<button class="opt ${g.style === k ? 'on' : ''}" data-k="${k}">${l}</button>`).join('')}</div>
       <span class="lbl">نص داخل الصورة (اختياري)</span><input class="field" id="itx" maxlength="120" value="${esc(g.text)}" placeholder="مثلاً: تخفيض 20%">
@@ -1367,6 +1372,7 @@ function drawStudio() {
         <figcaption><span class="xs grow" title="${esc(x.prompt)}">${esc(x.prompt)}</span>
         <a class="btn grey icon sm" href="${esc(x.url)}" download target="_blank" rel="noopener" aria-label="تحميل">${ic('download')}</a>
         <button class="btn grey icon sm" data-re="${x.id}" aria-label="إعادة استعمال الوصف">${ic('refresh')}</button>
+        <button class="btn grey icon sm" data-sch="${x.id}" aria-label="جدولة" title="جدولة">${ic('calendar')}</button>
         <button class="btn grey icon sm" data-anim="${x.id}" aria-label="حوّلها إلى فيديو" title="حوّلها إلى فيديو">${ic('play')}</button>
         <button class="btn grey icon sm" data-del="${x.id}" aria-label="حذف">${ic('trash')}</button></figcaption></figure>`).join('')}</div>`
       : `<div class="empty" style="padding:28px"><span class="ic">${ic('studio')}</span><h3>لا توجد صور بعد</h3><p>اكتب وصفاً واضغط توليد. يمكنك أيضاً تصميم صورة لأي منشور من صفحة النتائج.</p></div>`}
@@ -1381,6 +1387,7 @@ function drawStudio() {
     if (!g.prompt.trim()) return toast('اكتب وصف الصورة', true);
     try { const img = await api(`/api/brands/${b.id}/images`, { method: 'POST', body: { ...g, ai: aiOf('image') } }); S.images = [img, ...S.images]; S.ov = null; drawStudio(); toast(`تم · ${img.model} · ${(img.ms / 1000).toFixed(1)} ث`); fallbackNote(img); } catch (err) { toast(err.message, true); }
   });
+  $$('[data-sch]', v).forEach((x) => (x.onclick = () => { const im = S.images.find((y) => y.id === x.dataset.sch); scheduleModal({ title: im.prompt.slice(0, 80), media: { type: 'image', url: im.url, aspect: im.aspect }, source: { kind: 'image', id: im.id } }); }));
   $$('[data-anim]', v).forEach((x) => (x.onclick = () => { const im = S.images.find((y) => y.id === x.dataset.anim); Object.assign(S.vid, { imageUrl: im.url, aspect: im.aspect === '9:16' || im.aspect === '4:5' ? '9:16' : '16:9', prompt: S.vid.prompt || im.prompt }); S.stab = 'video'; PAGES.studio(); }));
   $$('[data-re]', v).forEach((x) => (x.onclick = () => { const im = S.images.find((y) => y.id === x.dataset.re); Object.assign(g, { prompt: im.prompt, aspect: im.aspect, style: im.style || 'none' }); drawStudio(); }));
   $$('[data-del]', v).forEach((x) => (x.onclick = async () => {
@@ -1418,9 +1425,9 @@ async function drawVideo() {
       <span class="lbl" style="margin-top:0">${KIND_L.video}</span>${pickerHTML('video')}
       ${g.imageUrl ? `<div class="flex mt12 inset" style="padding:8px"><img src="${esc(g.imageUrl)}" alt="" style="width:56px;height:56px;object-fit:cover;border-radius:8px"><span class="sm grow">صورة البداية: سيتم تحريكها</span><button class="btn grey icon sm" id="vnoimg" aria-label="إزالة">${ic('x')}</button></div>` : ''}
       <label class="lbl">وصف المشهد</label>
-      <textarea class="field" id="vp" rows="4" maxlength="3000" placeholder="مثلاً: لقطة سينمائية لعائلة مغربية في صالون تقليدي، الأب يجرّب نظارات جديدة ويبتسم، الكاميرا تقترب ببطء، إضاءة دافئة">${esc(g.prompt)}</textarea>
+      <textarea class="field" id="vp" data-mic rows="4" maxlength="3000" placeholder="مثلاً: لقطة سينمائية لعائلة مغربية في صالون تقليدي، الأب يجرّب نظارات جديدة ويبتسم، الكاميرا تقترب ببطء، إضاءة دافئة">${esc(g.prompt)}</textarea>
       <label class="lbl">التعليق الصوتي / الحوار (اختياري)</label>
-      <textarea class="field" id="vvo" rows="2" maxlength="500" placeholder="الجملة التي تُقال في الفيديو، مثلاً: نظارتك الجديدة بنص الثمن، غير هاد الجمعة!">${esc(g.voiceover)}</textarea>
+      <textarea class="field" id="vvo" data-mic rows="2" maxlength="500" placeholder="الجملة التي تُقال في الفيديو، مثلاً: نظارتك الجديدة بنص الثمن، غير هاد الجمعة!">${esc(g.voiceover)}</textarea>
       <div class="grid c2 mt8" style="gap:12px">
         <div><span class="lbl">المدة</span><div class="opts" data-opts="seconds">${secs.map((n) => `<button class="opt ${g.seconds === n ? 'on' : ''}" data-k="${n}">${n} ث</button>`).join('')}</div></div>
         <div><span class="lbl">المقاس</span><div class="opts" data-opts="aspect"><button class="opt ${g.aspect === '9:16' ? 'on' : ''}" data-k="9:16">9:16 ريلز</button><button class="opt ${g.aspect === '16:9' ? 'on' : ''}" data-k="16:9">16:9</button></div></div>
@@ -1439,6 +1446,7 @@ async function drawVideo() {
           : `<div style="aspect-ratio:${x.aspect.replace(':', '/')};display:grid;place-items:center;background:var(--bg-hover)"><div style="text-align:center"><span class="spin" style="width:22px;height:22px"></span><div class="xs muted mt8">يُولَّد… ${fmtT(x.createdAt)}${x.progress ? ` · ${x.progress}%` : ''}</div></div></div>`}
         <figcaption><span class="xs grow" title="${esc(x.prompt)}">${esc(x.seconds + ' ث · ' + x.model)}</span>
           ${x.url ? `<a class="btn grey icon sm" href="${esc(x.url)}" download target="_blank" rel="noopener" aria-label="تحميل">${ic('download')}</a>` : ''}
+          ${x.status === 'completed' ? `<button class="btn primary sm" data-vsch="${x.id}" title="أضفه للتقويم">${ic('calendar')}جدولة</button>` : ''}
           <button class="btn grey icon sm" data-vre="${x.id}" aria-label="إعادة استعمال">${ic('refresh')}</button>
           <button class="btn grey icon sm" data-vdel="${x.id}" aria-label="حذف">${ic('trash')}</button></figcaption></figure>`).join('')}</div>`
       : `<div class="empty" style="padding:28px"><span class="ic">${ic('play')}</span><h3>لا توجد فيديوهات بعد</h3><p>اكتب وصف المشهد، أو اضغط ▷ على أي صورة في معرض الصور لتحريكها.</p></div>`}
@@ -1461,6 +1469,7 @@ async function drawVideo() {
       drawVideo();
     } catch (err) { toast(err.message, true); }
   });
+  $$('[data-vsch]', v).forEach((x) => (x.onclick = () => { const j = S.videos.find((y) => y.id === x.dataset.vsch); scheduleModal({ platforms: j.aspect === '9:16' ? ['instagram', 'tiktok'] : ['youtube', 'facebook'], title: j.prompt.slice(0, 80), caption: j.voiceover || '', media: { type: 'video', url: j.url, aspect: j.aspect }, source: { kind: 'video', id: j.id } }); }));
   $$('[data-vre]', v).forEach((x) => (x.onclick = () => { const j = S.videos.find((y) => y.id === x.dataset.vre); Object.assign(g, { prompt: j.prompt, voiceover: j.voiceover || '', aspect: j.aspect, seconds: j.seconds, imageUrl: j.fromImage || '' }); drawVideo(); }));
   $$('[data-vdel]', v).forEach((x) => (x.onclick = async () => {
     if (!(await confirmBox('حذف الفيديو؟', 'سيُحذف من المعرض والتخزين.', 'حذف', true))) return;
@@ -1482,6 +1491,210 @@ async function drawVideo() {
     videoTimer = setTimeout(tick, 8000);
   }
 }
+
+
+// ---------- voice input (mic on text fields) ----------
+const REC = { mr: null, stream: null, chunks: [], timer: null, started: 0 };
+async function recStart(onTick) {
+  if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') throw new Error('المتصفح لا يدعم التسجيل الصوتي');
+  REC.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  const mime = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg'].find((m) => MediaRecorder.isTypeSupported?.(m)) || '';
+  REC.mr = new MediaRecorder(REC.stream, mime ? { mimeType: mime } : {});
+  REC.chunks = [];
+  REC.mr.ondataavailable = (e) => e.data.size && REC.chunks.push(e.data);
+  REC.mr.start(250);
+  REC.started = Date.now();
+  REC.timer = setInterval(() => { const sec = Math.round((Date.now() - REC.started) / 1000); onTick && onTick(sec); if (sec >= 110) recStopBtn?.click(); }, 500);
+}
+let recStopBtn = null;
+function recStop() {
+  return new Promise((resolve) => {
+    clearInterval(REC.timer);
+    if (!REC.mr) return resolve(null);
+    REC.mr.onstop = () => {
+      REC.stream.getTracks().forEach((t) => t.stop());
+      const blob = new Blob(REC.chunks, { type: REC.mr.mimeType || 'audio/webm' });
+      REC.mr = null;
+      const r = new FileReader();
+      r.onload = () => resolve(r.result);
+      r.readAsDataURL(blob);
+    };
+    REC.mr.stop();
+  });
+}
+async function transcribe(dataUrl) {
+  return api('/api/transcribe', { method: 'POST', body: { brandId: S.activeId || null, dataUrl } });
+}
+function enhanceMics(root) {
+  $$('textarea[data-mic]', root).forEach((t) => {
+    if (t.parentElement.classList.contains('micwrap')) return;
+    const w = document.createElement('div');
+    w.className = 'micwrap';
+    t.replaceWith(w);
+    w.append(t);
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'mic';
+    b.title = 'تكلّم بدل الكتابة';
+    b.innerHTML = ic('voice');
+    w.append(b);
+    b.onclick = async () => {
+      if (REC.mr) {
+        recStopBtn = null;
+        b.classList.remove('rec');
+        b.innerHTML = '<span class="spin"></span>';
+        const dataUrl = await recStop();
+        try {
+          const r = await transcribe(dataUrl);
+          t.value = (t.value.trim() ? t.value.trim() + ' ' : '') + r.text;
+          t.dispatchEvent(new Event('input', { bubbles: true }));
+          toast('تم تحويل الصوت إلى نص');
+        } catch (e) { toast(e.message, true); }
+        b.innerHTML = ic('voice');
+        return;
+      }
+      try {
+        await recStart((sec) => { b.dataset.sec = sec; });
+        recStopBtn = b;
+        b.classList.add('rec');
+        b.innerHTML = '<i></i>';
+        toast('يسجّل… اضغط مرة أخرى للإيقاف');
+      } catch (e) { toast(e.name === 'NotAllowedError' ? 'اسمح للمتصفح باستعمال الميكروفون' : e.message, true); }
+    };
+  });
+}
+
+// ---------- voice assistant: say what you want, it fills the form and runs it ----------
+function waitFor(sel, fn, ms = 6000) {
+  const t0 = Date.now();
+  const tick = () => { const el = $(sel); if (el && !el.disabled) return fn(el); if (Date.now() - t0 < ms) setTimeout(tick, 150); };
+  tick();
+}
+async function runIntent(r) {
+  const a = r.action;
+  if (a === 'content') {
+    Object.assign(S.form, { idea: r.idea || r.transcript, occasion: '' }, r.platforms?.length ? { platforms: r.platforms } : {}, r.type ? { type: r.type } : {}, r.goal ? { goal: r.goal } : {}, r.dialect ? { dialect: r.dialect } : {}, r.count ? { count: r.count } : {}, r.productId ? { productId: r.productId } : {});
+    S.ctab = 'new'; S.batch = null; go('create'); waitFor('#cgo', (b) => b.click());
+  } else if (a === 'plan') {
+    Object.assign(S.planForm, r.platforms?.length ? { platforms: r.platforms } : {}, r.goal ? { goal: r.goal } : {}, r.dialect ? { dialect: r.dialect } : {}, r.perWeek ? { perWeek: r.perWeek } : {}, /^\d{4}-\d{2}$/.test(r.month || '') ? { month: r.month } : {});
+    S.ctab = 'plan'; go('create'); waitFor('#pgo', (b) => b.click());
+  } else if (a === 'image') {
+    Object.assign(S.img, { prompt: r.prompt || r.idea || r.transcript }, ['1:1', '4:5', '9:16', '16:9'].includes(r.aspect) ? { aspect: r.aspect } : {});
+    S.stab = 'image'; go('studio'); waitFor('#igo', (b) => b.click());
+  } else if (a === 'video') {
+    Object.assign(S.vid, { prompt: r.prompt || r.idea || r.transcript, voiceover: r.voiceover || '' }, ['9:16', '16:9'].includes(r.aspect) ? { aspect: r.aspect } : {}, r.seconds ? { seconds: r.seconds } : {});
+    S.stab = 'video'; go('studio'); waitFor('#vgo2', (b) => b.click());
+  } else if (a === 'voice') {
+    S.tts.text = r.text || r.idea || r.transcript; go('voice'); waitFor('#vgo', (b) => b.click(), 10000);
+  } else if (a === 'schedule') go('calendar');
+  else if (a === 'analyze') { S.brainTab = 'analyze'; go('brain'); waitFor('#arun', (b) => b.click()); }
+  if (r.reply) toast(r.reply);
+}
+function assistantModal() {
+  modal(`<h2>المساعد</h2><p class="muted sm mt8">قل ما تريد بالدارجة أو الفصحى أو أي لغة، مثلاً: "بغيت 3 بوستات إنستغرام على تخفيضات الجمعة السوداء" أو "دير ليا ريل 8 ثواني لنظارات شمسية".</p>
+    <div class="assist-rec"><button class="assist-mic" id="amic" aria-label="سجّل">${ic('voice')}</button><div class="muted sm" id="ast">اضغط وتكلّم</div></div>
+    <label class="lbl">أو اكتب طلبك</label><textarea class="field" id="atx" rows="3" placeholder="اكتب أو تكلّم…"></textarea>
+    <div class="foot"><button class="btn ghost" data-x>إلغاء</button><button class="btn primary" id="ago" data-busy="يفهم طلبك…">${ic('sparkle')}نفّذ</button></div>`, (m) => {
+    $('[data-x]', m).onclick = () => { if (REC.mr) recStop(); closeModal(); };
+    const send = () => busy($('#ago'), async () => {
+      const text = $('#atx').value.trim();
+      if (!text) return toast('قل أو اكتب طلبك', true);
+      try { const r = await api('/api/assistant', { method: 'POST', body: { brandId: S.activeId || null, text, ai: aiOf('text') } }); closeModal(); if (!S.brand && ['content', 'plan', 'image', 'video', 'voice', 'analyze'].includes(r.action)) return toast('أنشئ أو اختر براند أولاً', true); runIntent(r); } catch (e) { toast(e.message, true); }
+    });
+    $('#ago').onclick = send;
+    const mic = $('#amic');
+    mic.onclick = async () => {
+      if (REC.mr) {
+        mic.classList.remove('rec'); $('#ast').textContent = 'يحوّل صوتك إلى نص…';
+        const dataUrl = await recStop();
+        try { const r = await transcribe(dataUrl); $('#atx').value = r.text; $('#ast').textContent = 'فهمت. يرسل الطلب…'; send(); } catch (e) { $('#ast').textContent = e.message; }
+        return;
+      }
+      try { await recStart((sec) => { $('#ast') && ($('#ast').textContent = `يسجّل… ${sec} ث · اضغط للإيقاف والإرسال`); }); recStopBtn = mic; mic.classList.add('rec'); } catch (e) { $('#ast').textContent = e.name === 'NotAllowedError' ? 'اسمح للمتصفح باستعمال الميكروفون' : e.message; }
+    };
+  });
+}
+
+// ---------- schedule (calendar) ----------
+const PLAT_L = { instagram: 'Instagram', facebook: 'Facebook', tiktok: 'TikTok', x: 'X', linkedin: 'LinkedIn', snapchat: 'Snapchat', youtube: 'YouTube', threads: 'Threads', whatsapp: 'WhatsApp' };
+function mediaHTML(m, h = 160) {
+  if (!m) return '';
+  return m.type === 'video' ? `<video src="${esc(m.url)}" controls playsinline preload="metadata" style="width:100%;max-height:${h}px;background:#000;border-radius:10px"></video>`
+    : m.type === 'image' ? `<img src="${esc(m.url)}" alt="" style="width:100%;max-height:${h}px;object-fit:contain;background:var(--bg-surface);border-radius:10px">` : `<audio src="${esc(m.url)}" controls style="width:100%"></audio>`;
+}
+function scheduleModal(pre = {}, existing = null) {
+  if (!S.brand) return toast('اختر براند أولاً', true);
+  const d = new Date(Date.now() + 86400000);
+  const st = { platforms: pre.platforms?.length ? [...pre.platforms] : ['instagram'] };
+  const it = existing || {};
+  modal(`<h2>${existing ? 'تعديل الجدولة' : 'جدولة للنشر'}</h2>
+    ${mediaHTML(it.media || pre.media) ? `<div class="mt12">${mediaHTML(it.media || pre.media)}</div>` : ''}
+    <div class="grid c2 mt8" style="gap:12px"><div><label class="lbl">التاريخ</label><input class="field ltr" type="date" id="sd" value="${esc(it.date || pre.date || d.toISOString().slice(0, 10))}"></div>
+      <div><label class="lbl">الساعة</label><input class="field ltr" type="time" id="st" value="${esc(it.time || pre.time || '19:00')}"></div></div>
+    <span class="lbl">المنصات</span><div class="opts" data-opts="platforms">${Object.entries(PLAT_L).map(([k, l]) => `<button class="opt ${(it.platforms || st.platforms).includes(k) ? 'on' : ''}" data-k="${k}">${l}</button>`).join('')}</div>
+    <label class="lbl">العنوان (داخلي)</label><input class="field" id="sti" maxlength="160" value="${esc(it.title || pre.title || '')}">
+    <label class="lbl">النص المرافق</label><textarea class="field" id="sc" data-mic rows="5" maxlength="5000">${esc(it.caption ?? pre.caption ?? '')}</textarea>
+    <div class="foot">${existing ? `<button class="btn ghost danger" id="sdel">${ic('trash')}حذف</button><span class="grow"></span>` : ''}<button class="btn ghost" data-x>إلغاء</button><button class="btn primary" id="ss">${ic('calendar')}${existing ? 'حفظ' : 'جدولة'}</button></div>`, (m) => {
+    if (existing) st.platforms = [...existing.platforms];
+    bindOpts(m, st, ['platforms']);
+    $('[data-x]', m).onclick = closeModal;
+    $('#ss').onclick = () => busy($('#ss'), async () => {
+      const body = { date: $('#sd').value, time: $('#st').value, platforms: st.platforms, title: $('#sti').value, caption: $('#sc').value, media: it.media || pre.media || null, source: it.source || pre.source || null };
+      try {
+        const r = existing ? await api(`/api/brands/${S.brand.id}/schedule/${existing.id}`, { method: 'PATCH', body }) : await api(`/api/brands/${S.brand.id}/schedule`, { method: 'POST', body });
+        closeModal(); toast(`تمت الجدولة · ${r.date} ${r.time}`);
+        if (S.page === 'calendar') PAGES.calendar();
+      } catch (e) { toast(e.message, true); }
+    });
+    $('#sdel', m) && ($('#sdel').onclick = async () => { try { await api(`/api/brands/${S.brand.id}/schedule/${existing.id}`, { method: 'DELETE' }); closeModal(); PAGES.calendar(); } catch (e) { toast(e.message, true); } });
+  });
+}
+function itemModal(x) {
+  modal(`<div class="flex"><h2 class="grow">${esc(x.title || 'منشور مجدول')}</h2>${x.status === 'published' ? chip('نُشر', 'em') : chip('مجدول', 'vi')}</div>
+    <p class="muted sm mt8"><span class="ltr">${esc(x.date)} · ${esc(x.time)}</span> · ${x.platforms.map((p) => PLAT_L[p]).join('، ')}</p>
+    ${x.media ? `<div class="mt12">${mediaHTML(x.media, 360)}</div>` : ''}
+    ${x.caption ? `<div class="inset mt12 sm" style="white-space:pre-wrap;max-height:220px;overflow:auto">${esc(x.caption)}</div>` : ''}
+    <div class="foot" style="flex-wrap:wrap">
+      ${x.caption ? `<button class="btn grey" id="icp">${ic('copy')}نسخ النص</button>` : ''}
+      ${x.media ? `<a class="btn grey" href="${esc(x.media.url)}" download target="_blank" rel="noopener">${ic('download')}تحميل</a>` : ''}
+      <button class="btn grey" id="ied">${ic('edit')}تعديل</button><span class="grow"></span>
+      <button class="btn ${x.status === 'published' ? 'ghost' : 'primary'}" id="ipub">${ic('check')}${x.status === 'published' ? 'إرجاع لمجدول' : 'تم النشر'}</button></div>`, (m) => {
+    $('#icp', m) && ($('#icp').onclick = () => navigator.clipboard.writeText(x.caption).then(() => toast('تم النسخ')));
+    $('#ied').onclick = () => scheduleModal({}, x);
+    $('#ipub').onclick = () => busy($('#ipub'), async () => { try { await api(`/api/brands/${S.brand.id}/schedule/${x.id}`, { method: 'PATCH', body: { status: x.status === 'published' ? 'scheduled' : 'published' } }); closeModal(); PAGES.calendar(); } catch (e) { toast(e.message, true); } });
+  });
+}
+S.calMonth = new Date().toISOString().slice(0, 7);
+PAGES.calendar = async () => {
+  if (needBrand()) return header();
+  header(`<button class="btn primary" id="cadd">${ic('plus')}جدولة جديدة</button>`);
+  $('#cadd').onclick = () => scheduleModal();
+  const month = S.calMonth;
+  const { items } = await api(`/api/brands/${S.brand.id}/schedule?month=${month}`);
+  const [y, mo] = month.split('-').map(Number);
+  const first = new Date(y, mo - 1, 1).getDay();
+  const days = new Date(y, mo, 0).getDate();
+  const today = new Date().toISOString().slice(0, 10);
+  const by = {};
+  for (const x of items) (by[x.date] = by[x.date] || []).push(x);
+  const cells = [];
+  for (let i = 0; i < first; i++) cells.push('<div class="cd blank"></div>');
+  for (let d = 1; d <= days; d++) {
+    const k = `${month}-${String(d).padStart(2, '0')}`;
+    cells.push(`<div class="cd ${k === today ? 'today' : ''}" data-day="${k}"><div class="flex"><b class="xs tnum">${d}</b></div>
+      ${(by[k] || []).map((x) => `<button class="ci ${x.status === 'published' ? 'pub' : ''}" data-it="${x.id}" title="${esc(x.title || x.caption)}">${x.media?.type === 'video' ? ic('play') : x.media?.type === 'image' ? ic('studio') : ic('edit')}<span><b class="tnum">${esc(x.time)}</b> ${esc(x.title || x.caption.slice(0, 40) || x.platforms.map((p) => PLAT_L[p]).join('، '))}</span></button>`).join('')}</div>`);
+  }
+  while (cells.length % 7) cells.push('<div class="cd blank"></div>');
+  const label = new Date(y, mo - 1, 1).toLocaleDateString('ar-MA', { month: 'long', year: 'numeric' });
+  const v = view(`<div class="inset sm mb16">${ic('calendar')} الجدولة الآن تنظّم وتذكّرك: كل منشور فيه النص والملف جاهزان للنسخ والتحميل. <b>النشر التلقائي</b> على إنستغرام وتيك توك وفيسبوك يحتاج ربط حساباتك، وهو الخطوة القادمة.</div>
+    <div class="card"><div class="card-h"><button class="btn grey icon sm" id="cprev" aria-label="السابق">${ic('arrow', 'rtl-flip')}</button><h3 style="flex:1;text-align:center">${esc(label)}</h3><button class="btn grey icon sm" id="cnext" aria-label="التالي">${ic('arrow')}</button></div>
+      <div class="flex wrap mb16">${chip(`${items.filter((x) => x.status === 'scheduled').length} مجدول`, 'vi')}${chip(`${items.filter((x) => x.status === 'published').length} نُشر`, 'em')}<span class="muted xs">اضغط على يوم لإضافة جدولة فيه</span></div>
+      <div class="cal">${['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'].map((x) => `<div class="cw">${x}</div>`).join('')}${cells.join('')}</div></div>`);
+  $('#cprev', v).onclick = () => { const d = new Date(y, mo - 2, 1); S.calMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; PAGES.calendar(); };
+  $('#cnext', v).onclick = () => { const d = new Date(y, mo, 1); S.calMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; PAGES.calendar(); };
+  $$('[data-it]', v).forEach((b) => (b.onclick = (e) => { e.stopPropagation(); itemModal(items.find((x) => x.id === b.dataset.it)); }));
+  $$('[data-day]', v).forEach((c) => (c.onclick = () => scheduleModal({ date: c.dataset.day })));
+};
 
 // ---------- setup (database not connected yet) ----------
 function renderSetup(st) {

@@ -6,6 +6,9 @@ const providers = require('../lib/providers');
 const ai = require('../lib/ai');
 const content = require('../lib/content');
 const video = require('../lib/video');
+const schedule = require('../lib/schedule');
+const stt = require('../lib/stt');
+const assistant = require('../lib/assistant');
 const { sign, verify, safeEqual } = require('../lib/crypto');
 
 const COOKIE = 'mos_s';
@@ -279,6 +282,14 @@ module.exports = async (req, res) => {
       const fonts = await store.update('fonts.json', {}, (f) => { const old = f[w]?.url; f[w] = { url: saved.url, format, size: buf.length }; if (old) store.deleteFile(old).catch(() => {}); return f; });
       return send(res, 200, { fonts });
     }
+    if (path === '/api/transcribe' && method === 'POST') {
+      const b = await readBody(req);
+      return send(res, 200, await stt.transcribe(b.brandId && /^[a-f0-9]+$/.test(b.brandId) ? b.brandId : null, b.dataUrl));
+    }
+    if (path === '/api/assistant' && method === 'POST') {
+      const b = await readBody(req);
+      return send(res, 200, await assistant.understand(b.brandId && /^[a-f0-9]+$/.test(b.brandId) ? b.brandId : null, b.text, { ai: b.ai?.provider ? b.ai : undefined }));
+    }
     if (path === '/api/content/options') return send(res, 200, { ...content.OPTIONS, styles: Object.keys(content.STYLES) });
     if (path === '/api/eleven/models') return send(res, 200, { models: eleven.MODELS });
 
@@ -354,6 +365,14 @@ module.exports = async (req, res) => {
       }
       const im = sub && sub.match(/^images\/([a-z0-9]+)$/);
       if (im && method === 'DELETE') { await content.deleteImage(id, im[1]); return send(res, 200, { ok: true }); }
+
+      if (sub === 'schedule') {
+        if (method === 'GET') return send(res, 200, { items: await schedule.list(id, query.get('month')) });
+        if (method === 'POST') return send(res, 200, await schedule.add(id, await readBody(req)));
+      }
+      const sm = sub && sub.match(/^schedule\/([a-z0-9]+)$/);
+      if (sm && method === 'PATCH') return send(res, 200, await schedule.patch(id, sm[1], await readBody(req)));
+      if (sm && method === 'DELETE') { await schedule.remove(id, sm[1]); return send(res, 200, { ok: true }); }
 
       if (sub === 'videos') {
         if (method === 'GET') return send(res, 200, { videos: await video.list(id) });
