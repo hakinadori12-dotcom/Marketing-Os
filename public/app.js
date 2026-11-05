@@ -364,7 +364,7 @@ function brandMenu(anchor) {
 async function setBrand(id, { silent = false } = {}) {
   S.activeId = id || '';
   store.set('mos-brand', S.activeId);
-  S.brand = null; S.keys = null; S.voices = null; S.audio = null; S.analysis = null; S.keySel.clear();
+  S.brand = null; S.keys = null; S.voices = null; S.vlib = null; S.vrec = null; S.vnote = ''; S.audio = null; S.analysis = null; S.keySel.clear();
   if (id) { try { S.brand = await api(`/api/brands/${id}`); } catch (e) { toast(e.message, true); } }
   if (!silent) { renderShell(); go(S.page, { replace: true }); }
 }
@@ -989,6 +989,7 @@ PAGES.voice = async () => {
   try {
     if (!S.voices) { const vr = await api(`/api/brands/${id}/voices`); S.voices = vr.voices; S.vplan = vr.plan; if (vr.note) toast(`تعذّر جلب أصوات حسابك (${vr.note}). تظهر الأصوات الجاهزة من ElevenLabs.`, true); }
     if (!S.audio) S.audio = (await api(`/api/brands/${id}/audio`)).items;
+    if (!S.vlib) await loadVoiceLibrary(S.vlang || voiceLangGuess(), S.vaccent);
   } catch (e) { toast(e.message, true); S.voices = S.voices || []; S.audio = S.audio || []; }
   if (S.page === 'voice' && S.brand?.id === id) drawVoice({ pool: k.summary });
 };
@@ -1006,19 +1007,38 @@ const vtrPhrase = (p) => String(p || '').split(/(\s*[&,/]\s*|\s+)/).map((x) => (
 function voiceName(x) { const [n, d] = String(x.name).split(/\s+-\s+/); return { name: n, desc: d ? vtrPhrase(d) : '' }; }
 function voiceTags(x) {
   const L = x.labels || {};
-  const tags = [L.gender, L.age, L.accent, L.use_case || L['use case'], L.language, x.category].filter(Boolean).map(vtr);
+  const tags = [L.gender, L.age, L.accent, L.use_case || L['use case'], L.language, x.library ? '' : x.category].filter(Boolean).map(vtr);
   if (L.description && !/\s/.test(L.description.trim())) tags.push(vtr(L.description));
   else if (L.description) tags.push(vtrPhrase(L.description));
   return [...new Set(tags)].slice(0, 5);
 }
+const VLANGS = [['ar', 'عربي'], ['en', 'English'], ['fr', 'Français'], ['es', 'Español']];
+const VACCENTS = [['', 'تلقائي'], ['gulf', 'خليجي'], ['saudi', 'سعودي'], ['egyptian', 'مصري'], ['moroccan', 'مغربي'], ['levantine', 'شامي'], ['msa', 'فصحى']];
+const allVoices = () => { const seen = new Set(); return [...(S.vlib || []), ...(S.voices || [])].filter((x) => !seen.has(x.id) && seen.add(x.id)); };
+function voiceLangGuess() {
+  const t = S.tts?.text || '';
+  if (/[\u0600-\u06FF]/.test(t)) return 'ar';
+  const b = `${S.brand?.fields?.languages?.value || ''} ${S.brand?.fields?.market?.value || ''}`;
+  if (/عرب|arab|دارج|خليج|سعود|مصر|مغرب|gcc|ksa|uae/i.test(b)) return 'ar';
+  return t.trim() ? (/[éèàçêù]/i.test(t) ? 'fr' : 'en') : 'ar';
+}
+async function loadVoiceLibrary(lang, accent) {
+  if (S.vplan === 'free' || lang === 'en') { S.vlib = []; return; }
+  try { const r = await api(`/api/brands/${S.brand.id}/voices/library?lang=${lang}&accent=${accent || ''}`); S.vlib = r.voices || []; S.vlibNote = r.note || ''; } catch (e) { S.vlib = []; S.vlibNote = e.message; }
+}
 function drawVoice({ loading = false, pool } = {}) {
   const t = S.tts;
   const q = S.voiceQuery.trim().toLowerCase();
-  const isAr = (x) => /^(ar|arabic)$/i.test(x.labels?.language || '') || /arab|saudi|gulf|egypt|morocc|emirat|عرب/i.test(Object.values(x.labels || {}).join(' ') + x.name);
-  const voices = (S.voices || []).filter((x) => !q || (x.name + ' ' + Object.values(x.labels || {}).join(' ') + ' ' + voiceTags(x).join(' ')).toLowerCase().includes(q))
+  const lang = S.vlang || voiceLangGuess();
+  const isAr = (x) => {
+    const L = x.labels || {}; const blob = Object.values(L).join(' ') + ' ' + x.name;
+    if (lang === 'ar') return /^(ar|arabic)/i.test(L.language || '') || /arab|saudi|gulf|khaleej|egypt|morocc|emirat|levant|iraq|عرب/i.test(blob);
+    return new RegExp(`^${lang}`, 'i').test(L.language || '') || (lang === 'en' && /american|british|australian/i.test(blob));
+  };
+  const voices = allVoices().filter((x) => !q || (x.name + ' ' + Object.values(x.labels || {}).join(' ') + ' ' + voiceTags(x).join(' ')).toLowerCase().includes(q))
     .filter((x) => !S.vfree || x.access === 'free')
     .sort((a, b2) => (S.vrec?.[a.id]?.rank || 9) - (S.vrec?.[b2.id]?.rank || 9) || (S.vplan === 'free' ? Number(b2.access === 'free') - Number(a.access === 'free') : 0) || Number(isAr(b2)) - Number(isAr(a)));
-  if (S.voices && !S.voices.some((x) => x.id === S.voiceId)) S.voiceId = S.voices[0]?.id || '';
+  if (S.voices && !allVoices().some((x) => x.id === S.voiceId)) S.voiceId = S.voices[0]?.id || '';
   if (S.vplan === 'free' && S.voices?.find((x) => x.id === S.voiceId)?.access === 'paid') S.voiceId = S.voices.find((x) => x.access === 'free')?.id || S.voiceId;
   const PLAN = { free: ['حسابك مجاني', 'am'], paid: ['حساب مدفوع', 'em'], unknown: ['', ''] }[S.vplan || 'unknown'];
   const model = S.models.find((m) => m.id === t.modelId) || S.models[0];
@@ -1037,11 +1057,14 @@ function drawVoice({ loading = false, pool } = {}) {
         </div></div>
       </div>
       ${S.vplan === 'free' ? `<div class="inset sm mt16"><b>حسابك في ElevenLabs مجاني:</b> تعمل فقط الأصوات التي عليها «مجاني». الأصوات «المدفوعة» (أصوات المكتبة) تحتاج اشتراكاً. «اقترح لي الأنسب» يختار لك من المجانية فقط.</div>` : ''}
+      <div class="mt16"><span class="lbl" style="margin-top:0">لغة الصوت</span><div class="flex wrap" style="gap:6px">${VLANGS.map(([k, l]) => `<button class="btn sm ${lang === k ? 'primary' : 'ghost'}" data-vlang="${k}">${l}</button>`).join('')}</div>
+        ${lang === 'ar' ? `<div class="flex wrap mt8" style="gap:6px"><span class="xs muted">اللهجة:</span>${VACCENTS.map(([k, l]) => `<button class="btn sm ${(S.vaccent || '') === k ? 'primary' : 'ghost'}" data-vacc="${k}">${l}</button>`).join('')}</div>` : ''}
+        ${S.vnote ? `<div class="inset sm mt8">${esc(S.vnote)}</div>` : lang !== 'en' && S.vplan === 'free' ? `<div class="inset sm mt8">الأصوات ${lang === 'ar' ? 'العربية الأصلية' : 'الأصلية لهذه اللغة'} موجودة في مكتبة ElevenLabs وتحتاج اشتراكاً مدفوعاً. بحسابك المجاني: استعمل صوتاً «مجانياً» مع نموذج Multilingual v2 وسينطق ${lang === 'ar' ? 'العربية' : 'اللغة'} جيداً.</div>` : S.vlib?.length ? `<div class="hint mt8">${S.vlib.length} صوت ${lang === 'ar' ? 'عربي' : ''} أصلي من مكتبة ElevenLabs ظاهرة أولاً في القائمة.</div>` : ''}</div>
       <div class="flex mt16"><span class="lbl grow" style="margin:0">الصوت ${PLAN[0] ? chip(PLAN[0], PLAN[1], false) : ''}</span><label class="flex xs" style="cursor:pointer"><input type="checkbox" class="check" id="vfree" ${S.vfree ? 'checked' : ''}>المجانية فقط</label><button class="btn ghost sm" id="vrec" data-busy="يختار…">${ic('sparkle')}اقترح لي الأنسب</button><div class="search ${S.voiceQuery ? 'open' : ''}" id="vs"><button aria-label="بحث">${ic('search')}</button><input placeholder="ابحث في الأصوات" value="${esc(S.voiceQuery)}"></div></div>
       <div class="voice-list mt8" id="vl">${loading ? '<div class="skel" style="height:46px"></div><div class="skel" style="height:46px"></div><div class="skel" style="height:46px"></div>' :
         voices.length ? voices.map((x) => `<div class="voice ${x.id === S.voiceId ? 'on' : ''} ${S.vplan === 'free' && x.access === 'paid' ? 'locked' : ''}" data-v="${x.id}" tabindex="0" ${S.vplan === 'free' && x.access === 'paid' ? 'title="يحتاج اشتراكاً مدفوعاً في ElevenLabs"' : ''}>
           ${x.preview ? `<button class="play" data-pv="${x.id}" aria-label="استماع">${ic('play')}</button>` : '<span class="play" style="opacity:.3">' + ic('play') + '</span>'}
-          <div class="grow"><b class="sm">${esc(voiceName(x).name)}</b>${voiceName(x).desc ? ` <span class="xs sec">· ${esc(voiceName(x).desc)}</span>` : ''}${S.vrec?.[x.id] ? ` ${chip(`مقترح #${S.vrec[x.id].rank}`, 'em', false)}` : ''} ${x.access === 'paid' ? chip('مدفوع', S.vplan === 'free' ? 'ro' : '', false) : chip('مجاني', 'em', false)}<div class="muted xs">${esc(voiceTags(x).join(' · '))}</div>${S.vrec?.[x.id] ? `<div class="xs mt8" style="color:var(--accent)">${esc(S.vrec[x.id].why)}${S.vrec[x.id].settings ? ` · ${esc(S.vrec[x.id].settings)}` : ''}</div>` : ''}</div>
+          <div class="grow"><b class="sm">${esc(voiceName(x).name)}</b>${voiceName(x).desc ? ` <span class="xs sec">· ${esc(voiceName(x).desc)}</span>` : ''}${S.vrec?.[x.id] ? ` ${chip(`مقترح #${S.vrec[x.id].rank}`, 'em', false)}` : ''} ${x.library ? chip('من المكتبة', '', false) + ' ' : ''}${x.access === 'paid' ? chip('مدفوع', S.vplan === 'free' ? 'ro' : '', false) : chip('مجاني', 'em', false)}${isAr(x) && lang !== 'en' ? ' ' + chip(lang === 'ar' ? 'عربي أصلي' : 'أصلي', 'em', false) : ''}<div class="muted xs">${esc(voiceTags(x).join(' · '))}</div>${S.vrec?.[x.id] ? `<div class="xs mt8" style="color:var(--accent)">${esc(S.vrec[x.id].why)}${S.vrec[x.id].settings ? ` · ${esc(S.vrec[x.id].settings)}` : ''}</div>` : ''}</div>
           ${x.id === S.voiceId ? ic('check') : ''}</div>`).join('') : '<p class="muted sm" style="padding:12px">لا توجد أصوات مطابقة</p>'}</div>
       <div class="flex mt16" style="justify-content:flex-end"><span class="muted xs grow" id="vcost">${t.text.length ? `سيستهلك حوالي ${fmt(t.text.length)} حرف من رصيد المفاتيح` : ''}</span><button class="btn primary" id="vgo" data-busy="يولّد…" ${loading ? 'disabled' : ''}>${ic('voice')}توليد الصوت</button></div>
     </div>
@@ -1057,11 +1080,17 @@ function drawVoice({ loading = false, pool } = {}) {
   const ta = $('#vt', v);
   ta.oninput = () => { t.text = ta.value; $('#vc').textContent = `${ta.value.length}/5000`; $('#vcost').textContent = ta.value.length ? `سيستهلك حوالي ${fmt(ta.value.length)} حرف من رصيد المفاتيح` : ''; };
   $$('[data-sl]', v).forEach((r) => (r.oninput = () => { const k = r.dataset.sl; t[k] = Number(r.value); $(`#sv-${k}`).textContent = k === 'speed' ? Number(r.value).toFixed(2) + '×' : Math.round(r.value * 100) + '%'; }));
+  $$('[data-vlang]', v).forEach((b) => (b.onclick = async () => { S.vlang = b.dataset.vlang; S.vrec = null; S.vnote = ''; drawVoice({ pool, loading: true }); await loadVoiceLibrary(S.vlang, S.vaccent); drawVoice({ pool }); }));
+  $$('[data-vacc]', v).forEach((b) => (b.onclick = async () => { S.vaccent = b.dataset.vacc; S.vrec = null; S.vnote = ''; await loadVoiceLibrary('ar', S.vaccent); drawVoice({ pool }); }));
   $('#vfree', v) && ($('#vfree', v).onchange = (e) => { S.vfree = e.target.checked; drawVoice({ pool }); });
   $('#vrec', v).onclick = (e) => busy(e.currentTarget, async () => {
     try {
-      const r = await api(`/api/brands/${S.brand.id}/voices/recommend`, { method: 'POST', body: { text: t.text, freeOnly: S.vfree || S.vplan === 'free' } });
+      const r = await api(`/api/brands/${S.brand.id}/voices/recommend`, { method: 'POST', body: { text: t.text, lang, accent: S.vaccent || '', freeOnly: S.vfree || S.vplan === 'free' } });
+      const extra = r.picks.map((p) => p.voice).filter((x) => x && !allVoices().some((y) => y.id === x.id));
+      if (extra.length) S.vlib = [...extra, ...(S.vlib || [])];
       S.vrec = Object.fromEntries(r.picks.map((p, i) => [p.id, { ...p, rank: i + 1 }]));
+      S.vnote = r.note || '';
+      if (r.model && !/multilingual|v3/.test(t.modelId || '')) t.modelId = r.model;
       if (r.picks[0]) { S.voiceId = r.picks[0].id; store.set('mos-voice', S.voiceId); }
       drawVoice({ pool }); toast(r.picks.length ? 'اخترت لك أنسب 3 أصوات، الأول محدد الآن' : 'لم أجد صوتاً مناسباً', !r.picks.length);
     } catch (err) { toast(err.message, true); }
@@ -1078,7 +1107,7 @@ function drawVoice({ loading = false, pool } = {}) {
   });
   $$('[data-pv]', v).forEach((b) => (b.onclick = (e) => {
     e.stopPropagation();
-    const vo = S.voices.find((x) => x.id === b.dataset.pv);
+    const vo = allVoices().find((x) => x.id === b.dataset.pv);
     if (previewAudio && previewAudio.dataset.id === vo.id && !previewAudio.paused) { previewAudio.pause(); b.innerHTML = ic('play'); return; }
     if (previewAudio) previewAudio.pause();
     $$('[data-pv]', v).forEach((x) => (x.innerHTML = ic('play')));
@@ -1091,9 +1120,9 @@ function drawVoice({ loading = false, pool } = {}) {
   $('#vgo', v).onclick = (e) => busy(e.currentTarget, async () => {
     if (!t.text.trim()) return toast('اكتب النص أولاً', true);
     if (!S.voiceId) return toast('اختر صوتاً', true);
-    const vo = S.voices.find((x) => x.id === S.voiceId);
+    const vo = allVoices().find((x) => x.id === S.voiceId);
     try {
-      const r = await api(`/api/brands/${S.brand.id}/tts`, { method: 'POST', body: { text: t.text, voiceId: S.voiceId, voiceName: vo?.name, modelId: t.modelId, stability: t.stability, similarity: t.similarity, style: t.style, speed: t.speed } });
+      const r = await api(`/api/brands/${S.brand.id}/tts`, { method: 'POST', body: { text: t.text, voiceId: S.voiceId, voiceName: vo?.name, owner: vo?.owner || '', modelId: t.modelId, stability: t.stability, similarity: t.similarity, style: t.style, speed: t.speed } });
       S.audio = [{ url: r.url, text: t.text, voiceName: vo?.name, chars: r.chars, model: r.model, createdAt: new Date().toISOString(), fresh: true }, ...(S.audio || [])];
       if (pool) pool.remaining = Math.max(0, pool.remaining - r.chars);
       S.ov = null;

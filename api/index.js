@@ -507,22 +507,58 @@ module.exports = async (req, res) => {
       if (vm && method === 'GET') return send(res, 200, await video.status(id, vm[1]));
       if (vm && method === 'DELETE') { await video.remove(id, vm[1]); return send(res, 200, { ok: true }); }
 
+      if (sub === 'voices/library' && method === 'GET') {
+        const lang = String(query.get('lang') || 'ar').slice(0, 5);
+        const accent = String(query.get('accent') || '').slice(0, 20);
+        try { return send(res, 200, { voices: (await eleven.library(id, { language: lang, accent })).slice(0, 60) }); } catch (e) { return send(res, 200, { voices: [], note: e.message }); }
+      }
       if (sub === 'voices/recommend' && method === 'POST') {
         const body = await readBody(req);
         const all = await eleven.voices(id);
-        const free = all.plan === 'free' || body.freeOnly;
-        const list = free ? all.filter((x) => x.access === 'free') : all;
         const br = await brands.get(id);
         const txt = String(body.text || '').slice(0, 1500);
-        const cand = list.slice(0, 120).map((x) => `${x.id} | ${x.name} | ${Object.entries(x.labels || {}).map(([k, v]) => `${k}: ${v}`).join(', ')}`).join('\n');
-        const freeNote = free ? '\nThe account is on the FREE plan: only these default voices can be used. If none speaks the script language natively, pick the most natural multilingual one (the model eleven_multilingual_v2 / v3 speaks Arabic with any voice) and say so.' : '';
-        const out = await ai.json(`Pick the 3 best voices for this voice-over, best first. Consider language/accent of the script (Arabic dialect: Gulf, Saudi, Egyptian, Moroccan, MSA…), the brand tone and the use (ad, reel, explainer, story).
+        const brandLangs = `${br.fields?.languages?.value || ''} ${br.fields?.market?.value || ''}`;
+        // The voice language: chosen in the studio, else from the script, else from the brand.
+        const lang = /^[a-z]{2}$/.test(body.lang || '') ? body.lang : /[؀-ۿ]/.test(txt) ? 'ar' : /[a-z]/i.test(txt) && !/[؀-ۿ]/.test(txt) ? (/[éèàçêù]/i.test(txt) ? 'fr' : 'en') : /عرب|arab|دارج|خليج|سعود|مصر|مغرب|gcc|ksa|uae/i.test(brandLangs) ? 'ar' : 'en';
+        const accent = eleven.ACCENTS[body.accent] ? body.accent : lang !== 'ar' ? '' : /مغرب|morocc|دارج/i.test(brandLangs) ? 'moroccan' : /مصر|egypt/i.test(brandLangs) ? 'egyptian' : /سعود|saudi|ksa/i.test(brandLangs) ? 'saudi' : /خليج|gcc|uae|إمارات|كويت|قطر|gulf/i.test(brandLangs) ? 'gulf' : /شام|levant|لبنان|سوري|أردن/i.test(brandLangs) ? 'levantine' : '';
+        const LANG = { ar: 'Arabic', en: 'English', fr: 'French', es: 'Spanish', de: 'German', tr: 'Turkish' }[lang] || lang;
+        const ACC = { saudi: 'Saudi', gulf: 'Gulf / Khaleeji', egyptian: 'Egyptian', moroccan: 'Moroccan Darija', levantine: 'Levantine', iraqi: 'Iraqi', msa: 'Modern Standard Arabic' }[accent] || '';
+        const plan = all.plan;
+        const free = plan === 'free' || Boolean(body.freeOnly);
+        const speaks = (x) => {
+          const L = x.labels || {};
+          const blob = `${L.language || ''} ${L.accent || ''} ${x.name} ${L.description || ''}`;
+          if (lang === 'ar') return /^ar/i.test(L.language || '') || /arab|saudi|gulf|khaleej|egypt|morocc|emirat|levant|iraq|عرب/i.test(blob);
+          return new RegExp(`^${lang}`, 'i').test(L.language || '') || (lang === 'en' && /american|british|australian|english/i.test(blob));
+        };
+        const own = all.filter((x) => (!free || x.access === 'free'));
+        const nativeOwn = own.filter(speaks);
+        let lib = [];
+        let libNote = '';
+        if (!free && lang !== 'en') { try { lib = (await eleven.library(id, { language: lang, accent })).slice(0, 60); } catch (e) { libNote = e.message; } }
+        let pool = [...nativeOwn, ...lib];
+        let note = '';
+        if (!pool.length) {
+          // Nothing native available (usually a free plan): the multilingual model still speaks the language with a default voice.
+          pool = own.filter((x) => x.category === 'premade' || x.access === 'free');
+          if (lang !== 'en') note = free
+            ? `حسابك في ElevenLabs مجاني، والأصوات ${lang === 'ar' ? 'العربية' : 'الأصلية لهذه اللغة'} موجودة في مكتبة ElevenLabs وتحتاج اشتراكاً مدفوعاً. اخترت لك أفضل الأصوات المجانية التي تنطق ${lang === 'ar' ? 'العربية' : 'اللغة'} جيداً مع نموذج Multilingual v2، لكن اللكنة لن تكون أصلية 100%.`
+            : `لم أجد أصواتاً ${lang === 'ar' ? 'عربية' : 'لهذه اللغة'} في المكتبة الآن${libNote ? ` (${libNote})` : ''}. اخترت أفضل الأصوات متعددة اللغات.`;
+        }
+        const cand = pool.slice(0, 110).map((x) => `${x.id} | ${x.name} | ${Object.entries(x.labels || {}).filter(([, v]) => v).map(([k, v]) => `${k}: ${v}`).join(', ')}${x.library ? ` | library, ${x.uses || 0} uses` : ''}${x.about ? ` | ${x.about.slice(0, 120)}` : ''}`).join('\n');
+        const out = await ai.json(`Pick the 3 best voices for this voice-over, best first.
+TARGET LANGUAGE: ${LANG}${ACC ? `, accent/dialect: ${ACC}` : ''}. ${nativeOwn.length || lib.length ? `Every pick MUST be a native ${LANG} speaker${ACC ? ` and prefer the ${ACC} accent, then the closest one` : ''}. Never pick a voice whose language or accent is another language.` : `No native ${LANG} voice is available: pick the default voices that sound most natural in ${LANG} with the multilingual model.`}
+Then match the brand tone and the use (ad, reel, explainer, story). Prefer popular, clear, professional voices.
 Brand: ${br.name}. Tone: ${br.fields?.tone?.value || ''}. Audience: ${br.fields?.audience?.value || ''}. Market: ${br.fields?.market?.value || ''}.
 Script: ${txt || '(no script yet: recommend for the brand in general)'}
 Voices (id | name | labels):
-${cand}${freeNote}`, { type: 'object', properties: { picks: { type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, why: { type: 'string', description: 'one sentence in Arabic' }, settings: { type: 'string', description: 'short Arabic tip: stability/speed/style for this script' } }, required: ['id', 'why'] } } }, required: ['picks'] }, { kind: 'voice', brand: id });
-        const picks = (out.json.picks || []).filter((p) => list.some((x) => x.id === p.id)).slice(0, 3).map((p) => ({ id: p.id, why: String(p.why || ''), settings: String(p.settings || '') }));
-        return send(res, 200, { picks, plan: all.plan, freeOnly: free });
+${cand}`, { type: 'object', properties: { picks: { type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, why: { type: 'string', description: 'one sentence in Arabic: language/accent fit and tone fit' }, settings: { type: 'string', description: 'short Arabic tip: stability/speed/style for this script' } }, required: ['id', 'why'] } } }, required: ['picks'] }, { kind: 'voice', brand: id });
+        let picks = (out.json.picks || []).filter((p) => pool.some((x) => x.id === p.id));
+        // Safety net: if the AI still picked voices of another language, put native ones first.
+        if (nativeOwn.length || lib.length) picks = picks.filter((p) => speaks(pool.find((x) => x.id === p.id)));
+        for (const x of [...nativeOwn, ...lib]) { if (picks.length >= 3) break; if (!picks.some((p) => p.id === x.id)) picks.push({ id: x.id, why: `صوت ${lang === 'ar' ? 'عربي' : LANG} أصلي${x.labels?.accent ? ` (${x.labels.accent})` : ''}` }); }
+        picks = picks.slice(0, 3).map((p) => ({ id: p.id, why: String(p.why || ''), settings: String(p.settings || ''), voice: pool.find((x) => x.id === p.id) }));
+        return send(res, 200, { picks, plan, freeOnly: free, lang, accent, note, model: lang === 'en' ? null : 'eleven_multilingual_v2' });
       }
       if (sub === 'voices') { const list = await eleven.voices(id); return send(res, 200, { voices: list, note: list.note || null, plan: list.plan || 'unknown' }); }
       if (sub === 'audio') return send(res, 200, { items: await eleven.history(id, Number(query.get('limit')) || 30) });
