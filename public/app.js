@@ -1823,7 +1823,7 @@ async function saveCamp(c, extra = {}) {
 }
 async function renderTile(c, p, i, cv) {
   const d = campDesign(c); const full = document.createElement('canvas');
-  const qa = await renderSlide(full, d, p, i, c.posts.length);
+  const qa = await renderSlide(full, d, { ...p, composite: p.composite ?? (['product', 'texture'].includes(p.type) || p.hero) }, i, c.posts.length);
   if (cv) { cv.width = 360; cv.height = Math.round(360 * full.height / full.width); cv.getContext('2d').drawImage(full, 0, 0, cv.width, cv.height); }
   return { full, qa };
 }
@@ -1861,7 +1861,7 @@ ${(p.hashtags || []).map((h) => '#' + h).join(' ')}`).then(() => toast('نُسخ
   $$('[data-pi]', v).forEach((x) => (x.onclick = () => {
     const i = Number(x.dataset.pi); const p = c.posts[i];
     designer({ slides: [p], aspect: d.aspect, template: d.template, productId: ['product', 'texture'].includes(p.type) || p.hero ? c.productId || '' : '', design: { ...d, noCounter: true, layout: p.layout || 'auto' }, applyLabel: 'تطبيق على الحملة', idea: p.visual,
-      onApply: async (dd) => { const s2 = dd.slides[0]; p.layout = dd.layout || 'auto'; ['headline', 'highlight', 'sub', 'cta', 'prompt', 'bg', 'caption'].forEach((k) => (p[k] = s2[k] || '')); p.hashtags = s2.hashtags || []; c.design = keepSeries(dd); try { await saveCamp(c); } catch (err) { toast(err.message, true); } if (S.page === 'studio' && S.stab === 'campaign') drawCampaign(c); toast('طُبّق على الحملة · إعدادات الشعار والألوان والتذييل صارت موحّدة لكل السلسلة'); } });
+      onApply: async (dd) => { const s2 = dd.slides[0]; p.layout = s2.layout || dd.layout || p.layout || 'auto'; p.composite = s2.composite ?? dd.composite; p.pz = s2.pz || null; p.bgLayout = s2.bgLayout || ''; ['headline', 'highlight', 'sub', 'cta', 'prompt', 'bg', 'caption'].forEach((k) => (p[k] = s2[k] || '')); p.hashtags = s2.hashtags || []; c.design = keepSeries(dd); try { await saveCamp(c); } catch (err) { toast(err.message, true); } if (S.page === 'studio' && S.stab === 'campaign') drawCampaign(c); toast('طُبّق على الحملة · إعدادات الشعار والألوان والتذييل صارت موحّدة لكل السلسلة'); } });
   }));
   $('#cstyle', v).onclick = () => designer({ slides: c.posts, aspect: d.aspect, template: d.template, productId: c.productId || '', design: { ...d, noCounter: true }, applyLabel: 'تطبيق على الحملة',
     onApply: async (dd) => { dd.slides.forEach((s2, i) => { const p = c.posts[i]; ['headline', 'highlight', 'sub', 'cta', 'prompt', 'bg', 'caption'].forEach((k) => (p[k] = s2[k] || '')); p.hashtags = s2.hashtags || []; }); c.design = keepSeries(dd); try { await saveCamp(c); } catch (err) { toast(err.message, true); } if (S.page === 'studio' && S.stab === 'campaign') drawCampaign(c); } });
@@ -1872,8 +1872,11 @@ ${(p.hashtags || []).map((h) => '#' + h).join(' ')}`).then(() => toast('نُسخ
       const p = c.posts[i]; if (p.bg) continue;
       try {
         const usesProduct = prod && (['product', 'texture'].includes(p.type) || p.hero);
-        const img = await api(`/api/brands/${b.id}/images`, { method: 'POST', body: { prompt: p.prompt || p.visual, aspect: d.aspect, productId: usesProduct ? prod.id : undefined, useColors: true, arch: c.style, space: SPACE[d.template], layout: p.layout && p.layout !== 'auto' ? p.layout : defaultLayout(d.template, d.aspect), style: 'none', enhance: false, from: { campaign: c.id }, ai: aiOf('image') } });
-        p.bg = img.url; made++; await saveCamp(c);
+        const cut = usesProduct && prod.photo && d.composite !== false ? await productCut(prod.photo) : null;
+        const stage = Boolean(cut?.ok);
+        const lay = pickLayout(d, p, cut);
+        const img = await api(`/api/brands/${b.id}/images`, { method: 'POST', body: { prompt: p.prompt || p.visual, aspect: d.aspect, productId: usesProduct && !stage ? prod.id : undefined, stage, locate: !stage, useColors: true, arch: c.style, space: SPACE[d.template], layout: lay, style: 'none', enhance: false, from: { campaign: c.id }, ai: aiOf('image') } });
+        p.bg = img.url; p.pz = img.subject || null; p.composite = stage; p.bgLayout = stage ? lay : ''; p.layout = lay; made++; await saveCamp(c);
         const cv = document.querySelector(`[data-cv="${i}"]`); if (cv && S.camp === c.id) { await renderTile(c, p, i, cv); cv.closest('.ctile')?.querySelector('.cw')?.remove(); }
       } catch (err) { toast(`المنشور ${i + 1}: ${err.message}`, true); }
     }
@@ -2450,7 +2453,8 @@ async function paletteModal() {
 // ---------- logo background removal (in the browser, optional) ----------
 // Removes a plain background (white, black or any solid colour) from the logo edges, softens the edge,
 // optionally clears the same colour inside letters, and trims the empty margins.
-function logoCutout(im, { tol = 40, holes = false, remove = true } = {}) {
+function logoCutout(im, opts = {}) {
+  const { tol = 40, holes = false, remove = true } = opts;
   const r = Math.min(1, 1200 / Math.max(im.width, im.height));
   const w = Math.max(1, Math.round(im.width * r)); const h = Math.max(1, Math.round(im.height * r));
   const c = document.createElement('canvas'); c.width = w; c.height = h;
@@ -2461,6 +2465,8 @@ function logoCutout(im, { tol = 40, holes = false, remove = true } = {}) {
     for (let i = 0; i < w; i++) border.push(i, (h - 1) * w + i);
     for (let j = 0; j < h; j++) border.push(j * w, j * w + w - 1);
     const opaque = border.filter((k) => px[k * 4 + 3] > 200);
+    c.transparent = opaque.length <= border.length * 0.3;
+    if (!c.transparent) { const sd = [0, 1, 2].map((ch) => { const v = opaque.map((k) => px[k * 4 + ch]); const m = v.reduce((a, b) => a + b, 0) / v.length; return Math.sqrt(v.reduce((a, b) => a + (b - m) ** 2, 0) / v.length); }); c.plain = Math.max(...sd) < 30; }
     if (opaque.length > border.length * 0.3) {
       const med = (ch) => { const v = opaque.map((k) => px[k * 4 + ch]).sort((a, b) => a - b); return v[v.length >> 1]; };
       const bg = [med(0), med(1), med(2)];
@@ -2491,10 +2497,11 @@ function logoCutout(im, { tol = 40, holes = false, remove = true } = {}) {
   let x0 = w; let y0 = h; let x1 = -1; let y1 = -1;
   for (let yy = 0; yy < h; yy++) for (let xx = 0; xx < w; xx++) if (px[(yy * w + xx) * 4 + 3] > 12) { if (xx < x0) x0 = xx; if (xx > x1) x1 = xx; if (yy < y0) y0 = yy; if (yy > y1) y1 = yy; }
   if (x1 < 0) return c;
-  const pad = Math.round(Math.max(x1 - x0, y1 - y0) * 0.04);
+  const pad = Math.round(Math.max(x1 - x0, y1 - y0) * (opts.pad ?? 0.04));
   x0 = Math.max(0, x0 - pad); y0 = Math.max(0, y0 - pad); x1 = Math.min(w - 1, x1 + pad); y1 = Math.min(h - 1, y1 + pad);
   const o = document.createElement('canvas'); o.width = x1 - x0 + 1; o.height = y1 - y0 + 1;
   o.getContext('2d').drawImage(c, x0, y0, o.width, o.height, 0, 0, o.width, o.height);
+  o.ok = Boolean(c.transparent || c.plain);
   return o;
 }
 async function logoPrep(src) {
@@ -2858,6 +2865,8 @@ function saliency(src, W, H) {
       const q = [k0]; seen[k0] = 1; let n = 0; let x0 = gw; let y0 = gh; let x1 = 0; let y1 = 0;
       while (q.length) { const k = q.pop(); n++; const xx = k % gw; const yy = (k / gw) | 0; x0 = Math.min(x0, xx); x1 = Math.max(x1, xx); y0 = Math.min(y0, yy); y1 = Math.max(y1, yy);
         for (const nb of [xx > 0 ? k - 1 : -1, xx < gw - 1 ? k + 1 : -1, yy > 0 ? k - gw : -1, yy < gh - 1 ? k + gw : -1]) if (nb >= 0 && hot[nb] && !seen[nb]) { seen[nb] = 1; q.push(nb); } }
+      const sides = (x0 === 0) + (y0 === 0) + (x1 === gw - 1) + (y1 === gh - 1);
+      if (sides >= 3) continue;
       if (!best || n > best.n) best = { n, x0, y0, x1, y1 };
     }
     let subject = null;
@@ -2886,6 +2895,24 @@ function layoutZones(aspect, ar) {
 }
 const LAYOUT_PREF = { mono: ['L1', 'L3', 'L5', 'L3b', 'L2'], glow: ['L1', 'L2', 'L4', 'L3', 'L3b'], street: ['L5', 'L5b', 'L1', 'L3b'], bottom: ['L2', 'L1', 'L3', 'L3b'], card: ['L4', 'L1', 'L2'] };
 const defaultLayout = (template, aspect) => (aspect === '9:16' ? 'L7' : (LAYOUT_PREF[template] || ['L1'])[0]);
+// The real product photo, background removed (cached). ok=false when the photo has a busy background.
+const CUTS = new Map();
+function productCut(url) {
+  if (!url) return Promise.resolve(null);
+  if (!CUTS.has(url)) CUTS.set(url, loadImg(url).then((im) => (im ? logoCutout(im, { tol: 34, pad: 0.01 }) : null)).catch(() => null));
+  return CUTS.get(url);
+}
+const PRODUCT_Z = { L1: [0.18, 0.82, 0.385, 0.91], L2: [0.2, 0.8, 0.09, 0.563], L3: [0.06, 0.46, 0.16, 0.9], L3b: [0.54, 0.94, 0.16, 0.9], L4: [0.22, 0.78, 0.348, 0.815], L5: [0.06, 0.52, 0.44, 0.91], L5b: [0.06, 0.52, 0.1, 0.56], L6: [0.06, 0.46, 0.16, 0.9], L7: [0.15, 0.85, 0.427, 0.77], L7b: [0.15, 0.85, 0.2, 0.55] };
+// One layout decides BOTH the product place and the text place (skill section 5).
+function pickLayout(d, sl, cut) {
+  const want = sl?.layout && sl.layout !== 'auto' ? sl.layout : d.layout && d.layout !== 'auto' ? d.layout : '';
+  if (d.aspect === '9:16') return 'L7';
+  if (want) return want === 'L6' ? 'L3' : want;
+  const pref = (LAYOUT_PREF[d.template] || ['L1'])[0].replace('b', '');
+  if (cut && cut.height / cut.width > 1.7 && d.aspect === '1:1' && ['L1', 'L2', 'L4'].includes(pref)) return 'L3';
+  return pref;
+}
+const compositeOn = (d, sl) => (sl?.composite ?? d.composite) !== false && Boolean(LAYOUT_PREF[d.template]);
 async function renderSlide(canvas, d, sl, i, n) {
   const [W, H] = DSIZE[d.aspect] || DSIZE['1:1'];
   canvas.width = W; canvas.height = H;
@@ -2949,6 +2976,7 @@ async function renderSlide(canvas, d, sl, i, n) {
   };
   // Text colour that reads best on the photo region; soft scrim (never on the product) when under 4.5:1.
   let PZ = null;
+  const clipOut = () => { ctx.beginPath(); ctx.rect(0, 0, W, H); if (PZ) { ctx.moveTo(PZ.x0, PZ.y0); ctx.lineTo(PZ.x0, PZ.y1); ctx.lineTo(PZ.x1, PZ.y1); ctx.lineTo(PZ.x1, PZ.y0); ctx.closePath(); } ctx.clip('evenodd'); };
   const readable = (r, prefer) => {
     if (DRY) return { color: prefer || '#FFFFFF', cr: 21 };
     const L = regionLum(ctx, r.x0, r.y0, r.x1 - r.x0, r.y1 - r.y0);
@@ -2958,8 +2986,9 @@ async function renderSlide(canvas, d, sl, i, n) {
     if (bc < 4.5) {
       const dark = lum(best) > 0.5; const a = dark ? 'rgba(0,0,0,' : 'rgba(255,255,255,';
       const pad = W * 0.05; const R = { x0: Math.max(0, r.x0 - pad), y0: Math.max(0, r.y0 - pad), x1: Math.min(W, r.x1 + pad), y1: Math.min(H, r.y1 + pad) };
-      ctx.save(); ctx.beginPath(); ctx.rect(0, 0, W, H); if (PZ) ctx.rect(PZ.x1, PZ.y0, PZ.x0 - PZ.x1, PZ.y1 - PZ.y0); ctx.clip('evenodd');
-      ctx.filter = `blur(${Math.round(W * 0.03)}px)`; ctx.fillStyle = a + '.5)'; rr(ctx, R.x0, R.y0, R.x1 - R.x0, R.y1 - R.y0, W * 0.04); ctx.fill(); ctx.restore();
+      ctx.save(); clipOut(); const cx = (R.x0 + R.x1) / 2; const cy = (R.y0 + R.y1) / 2; const rad = Math.max(R.x1 - R.x0, R.y1 - R.y0) * 0.62;
+      const g = ctx.createRadialGradient(cx, cy, rad * 0.35, cx, cy, rad); g.addColorStop(0, a + '.55)'); g.addColorStop(1, a + '0)');
+      ctx.translate(cx, cy); ctx.scale(1, (R.y1 - R.y0) / Math.max(1, R.x1 - R.x0) + 0.25); ctx.translate(-cx, -cy); ctx.fillStyle = g; ctx.fillRect(0, -H, W, H * 3); ctx.restore();
       bc = contrast(lum(best), regionLum(ctx, r.x0, r.y0, r.x1 - r.x0, r.y1 - r.y0));
     }
     return { color: best, cr: bc };
@@ -3004,7 +3033,7 @@ async function renderSlide(canvas, d, sl, i, n) {
     if (!DRY && st.card) { const cb = box; const pad = W * 0.045; ctx.save(); ctx.shadowColor = 'rgba(0,0,0,.18)'; ctx.shadowBlur = 40; ctx.fillStyle = 'rgba(255,255,255,.94)'; rr(ctx, cb.x0 - pad, cb.y0 - pad, cb.x1 - cb.x0 + pad * 2, cb.y1 - cb.y0 + pad * 2, W * 0.035); ctx.fill(); ctx.restore(); qa.contrast.push(contrast(lum('#0A0A0A'), lum('#F2F2F2'))); box = null; }
     if (!DRY && st.scrim) {
       const cb = box; const lower = (cb.y0 + cb.y1) / 2 > H / 2; box = null;
-      ctx.save(); ctx.beginPath(); ctx.rect(0, 0, W, H); if (PZ) ctx.rect(PZ.x1, PZ.y0, PZ.x0 - PZ.x1, PZ.y1 - PZ.y0); ctx.clip('evenodd');
+      ctx.save(); clipOut();
       const g = lower ? ctx.createLinearGradient(0, cb.y0 - H * 0.15, 0, Math.min(H, cb.y1 + P)) : ctx.createLinearGradient(0, Math.min(H, cb.y1 + H * 0.15), 0, Math.max(0, cb.y0 - P));
       g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,.72)'); ctx.fillStyle = g;
       if (lower) ctx.fillRect(0, cb.y0 - H * 0.15, W, H); else ctx.fillRect(0, 0, W, cb.y1 + H * 0.15);
@@ -3019,8 +3048,29 @@ async function renderSlide(canvas, d, sl, i, n) {
   };
   if (STY[t]) {
     drawCover(ctx, bg, 0, 0, W, H);
-    const sal = bg ? saliency(canvas, W, H) : null;
-    PZ = sal?.subject ? { x0: sal.subject.x0 - GAP, y0: sal.subject.y0 - GAP, x1: sal.subject.x1 + GAP, y1: sal.subject.y1 + GAP } : null;
+    const prod = (S.brand.products || []).find((p) => p.id === (sl.productId || d.productId));
+    const cut = compositeOn(d, sl) && prod?.photo ? await productCut(prod.photo) : null;
+    let sal = null; let forced = '';
+    if (cut?.ok) {
+      // the REAL product photo goes into the layout's product zone (it can never be covered by the text zone)
+      forced = pickLayout(d, sl, cut);
+      const z = PRODUCT_Z[forced] || PRODUCT_Z.L1;
+      const zx0 = z[0] * W; const zx1 = z[1] * W; const zy0 = z[2] * H; const zy1 = z[3] * H;
+      const r = Math.min((zx1 - zx0) / cut.width, (zy1 - zy0) / cut.height) * 0.96;
+      const pw = cut.width * r; const ph = cut.height * r; const px = (zx0 + zx1) / 2 - pw / 2; const py = zy1 - ph;
+      const sh = ctx.createRadialGradient(px + pw / 2, zy1, 0, px + pw / 2, zy1, pw * 0.55);
+      sh.addColorStop(0, 'rgba(0,0,0,.28)'); sh.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.save(); ctx.translate(px + pw / 2, zy1); ctx.scale(1, 0.14); ctx.translate(-(px + pw / 2), -zy1); ctx.fillStyle = sh; ctx.beginPath(); ctx.arc(px + pw / 2, zy1, pw * 0.55, 0, 7); ctx.fill(); ctx.restore();
+      ctx.drawImage(cut, px, py, pw, ph);
+      PZ = { x0: px - GAP, y0: py - GAP, x1: px + pw + GAP, y1: py + ph + GAP };
+      qa.composite = true;
+    } else if (sl.pz) {
+      PZ = { x0: sl.pz.x0 * W - GAP, y0: sl.pz.y0 * H - GAP, x1: sl.pz.x1 * W + GAP, y1: sl.pz.y1 * H + GAP };
+    } else {
+      sal = bg ? saliency(canvas, W, H) : null;
+      PZ = sal?.subject ? { x0: sal.subject.x0 - GAP, y0: sal.subject.y0 - GAP, x1: sal.subject.x1 + GAP, y1: sal.subject.y1 + GAP } : null;
+    }
+    if (!sal && bg) sal = saliency(canvas, W, H);
     // logo + footer: fixed corners, moved to another corner only if they would touch the product
     if (logoR) {
       const at = (p2) => { const x = p2 === 'tc' ? (W - logoR.w) / 2 : p2[1] === 'r' ? W - P - logoR.w : P; const y = p2[0] === 'b' ? H - BOT - logoR.h : TOP; return { x0: x, y0: y, x1: x + logoR.w, y1: y + logoR.h }; };
@@ -3036,7 +3086,7 @@ async function renderSlide(canvas, d, sl, i, n) {
     if (t === 'glow') { ctx.save(); [[0.12, 0.2, 0.05], [0.9, 0.34, 0.035], [0.84, 0.78, 0.028]].slice(0, 2 + (i % 2)).forEach(([cx, cy, r]) => { const R = W * r * 2.2; if (hitRect({ x0: W * cx - R, y0: H * cy - R, x1: W * cx + R, y1: H * cy + R }, PZ)) return; const g = ctx.createRadialGradient(W * cx, H * cy, 0, W * cx, H * cy, R); g.addColorStop(0, 'rgba(255,255,255,.55)'); g.addColorStop(1, 'rgba(255,255,255,0)'); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(W * cx, H * cy, R, 0, 7); ctx.fill(); }); ctx.restore(); }
     // candidate zones (layout library), clipped by the logo and footer
     const Zs = layoutZones(d.aspect, ar);
-    const want = sl.layout && sl.layout !== 'auto' ? sl.layout : d.layout && d.layout !== 'auto' ? d.layout : '';
+    const want = forced || (sl.layout && sl.layout !== 'auto' ? sl.layout : d.layout && d.layout !== 'auto' ? d.layout : '');
     // golden rule first: the chosen layout is preferred, the others are the fallback when it would touch the product
     let order = story ? ['L7', 'L7b'] : want ? [want, ...(want === 'L6' ? ['L3', 'L3b'] : []), ...(['L3', 'L5'].includes(want) ? [want + 'b'] : [])] : [];
     order = [...new Set([...order, ...(story ? [] : LAYOUT_PREF[t] || ['L1']), ...Object.keys(Zs)])];
@@ -3160,10 +3210,10 @@ function designer(opts = {}) {
   if (fonts.head !== 'Thmanyah Sans') loadGFonts([fonts.head, fonts.body]);
   const d = {
     aspect: opts.aspect || '4:5', template: opts.template || autoArch(b), color: (b.visual?.colors || [])[0] || '#000000',
-    accent: (b.visual?.colors || [])[1] || '#E3262F', footer: brandFooter(b),
+    accent: (b.visual?.colors || [])[1] || '#E3262F', footer: brandFooter(b), composite: true,
     showLogo: Boolean(b.logo?.url) && opts.showLogo !== false, logoPos: 'left', logoPlate: false, size: 'm',
     fontHead: fonts.head, fontBody: fonts.body, productId: opts.productId || '', useProduct: Boolean(opts.productId), useColors: true,
-    slides: (opts.slides && opts.slides.length ? opts.slides : [{ headline: '', sub: '', cta: '', prompt: '' }]).map((x) => ({ headline: x.headline || '', highlight: x.highlight || '', sub: x.sub || '', cta: x.cta || '', prompt: x.prompt || '', bg: x.bg || '', caption: x.caption || '', hashtags: x.hashtags || [] })),
+    slides: (opts.slides && opts.slides.length ? opts.slides : [{ headline: '', sub: '', cta: '', prompt: '' }]).map((x) => ({ headline: x.headline || '', highlight: x.highlight || '', sub: x.sub || '', cta: x.cta || '', prompt: x.prompt || '', bg: x.bg || '', caption: x.caption || '', hashtags: x.hashtags || [], layout: x.layout || '', composite: x.composite, pz: x.pz || null, bgLayout: x.bgLayout || '' })),
     cur: 0,
   };
   Object.entries(opts.design || {}).forEach(([k, v]) => { if (v !== undefined && !['slides', 'cur'].includes(k)) d[k] = v; });
@@ -3189,6 +3239,8 @@ function designer(opts = {}) {
           ${prods.length ? `<div class="sel" style="min-width:160px;flex:1"><button class="sel-btn" id="dzprod" data-menu><span class="lab">${esc(prods.find((p) => p.id === d.productId)?.name || 'بدون منتج')}</span>${ic('chev')}</button></div>` : ''}
           <label class="flex xs" style="cursor:pointer"><input type="checkbox" class="check" id="dzcol" checked>ألوان البراند في الصورة</label>
         </div>
+        ${prods.length ? `<span class="lbl">المنتج في التصميم</span><div class="opts" id="dzcomp">${[['1', 'صورتك الحقيقية في مكانها (مضمون)'], ['0', 'داخل المشهد بالذكاء الاصطناعي']].map(([k, l]) => `<button class="opt ${String(Number(d.composite !== false)) === k ? 'on' : ''}" data-comp="${k}">${l}</button>`).join('')}</div>
+        <p class="hint mt8">«مضمون»: التخطيط يحدد مكان المنتج ومكان النص، الذكاء الاصطناعي يصمم المشهد فارغاً، ثم توضع صورة منتجك الحقيقية في مكانها. النص لا يلمسها أبداً.</p>` : ''}
         <div class="flex wrap mt8" style="gap:8px"><button class="btn primary sm" id="dzgen" data-busy="يصمم…">${ic('sparkle')}صمّم الخلفية</button>${d.slides.length > 1 ? `<button class="btn grey sm" id="dzall" data-busy="…">${ic('sparkle')}كل الشرائح</button>` : ''}
           <label class="btn grey sm" data-drop style="cursor:pointer">${ic('upload')}ارفع صورة<input type="file" id="dzup" accept="image/*" hidden></label><button class="btn ghost sm" id="dzgal">${ic('studio')}من المعرض</button></div>
         <span class="lbl">العناصر</span>
@@ -3214,6 +3266,8 @@ function designer(opts = {}) {
       const qa = await renderSlide(c, d, sl(), d.cur, d.slides.length);
       if (my !== tick) return;
       const ql = qaList(qa, sl());
+      if (qa.composite && sl().bgLayout && sl().bgLayout !== qa.layout) ql.push([false, `الخلفية صُممت لتخطيط ${sl().bgLayout}: أعد «صمّم الخلفية» حتى تتطابق المنصة مع مكان المنتج`]);
+      if (qa.composite) ql.unshift([true, 'صورة المنتج الحقيقية في مكانها المحدد']);
       $('#dzqa', m).innerHTML = `<b class="xs">فحص الجودة ${ql.every((x) => x[0]) ? chip('ممتاز', 'em', false) : chip(`${ql.filter((x) => !x[0]).length} ملاحظة`, 'am', false)}</b>${ql.map(([ok2, tx]) => `<div class="xs mt8" style="color:${ok2 ? 'var(--text-2)' : '#D97706'}">${ok2 ? '✓' : '⚠'} ${esc(tx)}</div>`).join('')}`;
       cv.width = c.width; cv.height = c.height; cv.getContext('2d').drawImage(c, 0, 0);
       const st = $('#dzs', m);
@@ -3224,6 +3278,7 @@ function designer(opts = {}) {
     let to;
     $$('[data-t]', m).forEach((x) => (x.onclick = () => { d.template = x.dataset.t; $('#dzth', m).textContent = ARCH_L[d.template]?.[1] || ''; $$('[data-t]', m).forEach((y) => y.classList.toggle('on', y === x)); draw(); }));
     $('#dzzone', m).onchange = (e) => { d.showZone = e.target.checked; draw(); };
+    $$('[data-comp]', m).forEach((x) => (x.onclick = () => { d.composite = x.dataset.comp === '1'; d.slides.forEach((s3) => { s3.composite = undefined; }); $$('[data-comp]', m).forEach((y) => y.classList.toggle('on', y === x)); draw(); }));
     $$('[data-pos]', m).forEach((x) => (x.onclick = () => { d.layout = x.dataset.pos; $$('[data-pos]', m).forEach((y) => y.classList.toggle('on', y === x)); draw(); }));
     $$('[data-ac]', m).forEach((x) => (x.onclick = () => { d.accent = x.dataset.ac; $$('[data-ac]', m).forEach((y) => y.classList.toggle('on', y === x)); draw(); }));
     $('#dzfoot', m).oninput = (e) => { d.footer = e.target.value.slice(0, 60); clearTimeout(to); to = setTimeout(draw, 150); };
@@ -3244,8 +3299,12 @@ function designer(opts = {}) {
       if (!prompt) throw new Error('اكتب ماذا تُظهر الصورة');
       const prod = b.products.find((p) => p.id === d.productId);
       if (prod && prod.kind !== 'service' && !prod.photo) { closeModal(); return productPhotoModal(prod, () => designer({ ...opts, slides: d.slides, aspect: d.aspect, template: d.template, productId: d.productId })); }
-      const img = await api(`/api/brands/${b.id}/images`, { method: 'POST', body: { prompt, aspect: d.aspect, productId: d.productId || undefined, useColors: d.useColors, space: SPACE[d.template], layout: LAYOUT_PREF[d.template] ? (d.layout && d.layout !== 'auto' ? d.layout : defaultLayout(d.template, d.aspect)) : undefined, arch: ARCHS.includes(d.template) ? d.template : undefined, style: 'none', from: opts.from, ai: aiOf('image') } });
-      s2.bg = img.url; S.images = null;
+      const cut = prod?.photo && compositeOn(d, s2) ? await productCut(prod.photo) : null;
+      const stage = Boolean(cut?.ok);
+      const lay = LAYOUT_PREF[d.template] ? pickLayout(d, s2, cut) : undefined;
+      const img = await api(`/api/brands/${b.id}/images`, { method: 'POST', body: { prompt, aspect: d.aspect, productId: stage ? undefined : d.productId || undefined, stage, locate: !stage && Boolean(LAYOUT_PREF[d.template]), useColors: d.useColors, space: SPACE[d.template], layout: lay, arch: ARCHS.includes(d.template) ? d.template : undefined, style: 'none', from: opts.from, ai: aiOf('image') } });
+      s2.bg = img.url; s2.pz = img.subject || null; s2.bgLayout = stage ? lay : ''; if (stage && lay) s2.layout = s2.layout && s2.layout !== 'auto' ? s2.layout : lay; S.images = null;
+      if (prod?.photo && compositeOn(d, s2) && !stage) toast('صورة المنتج خلفيتها غير موحّدة، فوضعنا المنتج داخل المشهد. ارفع صورة المنتج بخلفية بيضاء أو شفافة للحصول على أفضل نتيجة.');
     };
     $('#dzgen', m).onclick = () => busy($('#dzgen', m), async () => { busyOn('يصمم الخلفية… حتى دقيقة'); try { await genBg(d.cur); await draw(); } catch (err) { toast(err.message, true); } busyOn(''); });
     $('#dzall', m) && ($('#dzall', m).onclick = () => busy($('#dzall', m), async () => {
