@@ -1861,7 +1861,7 @@ ${(p.hashtags || []).map((h) => '#' + h).join(' ')}`).then(() => toast('نُسخ
   $$('[data-pi]', v).forEach((x) => (x.onclick = () => {
     const i = Number(x.dataset.pi); const p = c.posts[i];
     designer({ slides: [p], aspect: d.aspect, template: d.template, productId: ['product', 'texture'].includes(p.type) || p.hero ? c.productId || '' : '', design: { ...d, noCounter: true, layout: p.layout || 'auto' }, applyLabel: 'تطبيق على الحملة', idea: p.visual,
-      onApply: async (dd) => { const s2 = dd.slides[0]; p.full = Boolean(s2.full); p.textCheck = s2.textCheck || null; p.fullSig = s2.fullSig || ''; p.layout = s2.layout || dd.layout || p.layout || 'auto'; p.composite = s2.composite ?? dd.composite; p.pz = s2.pz || null; p.bgLayout = s2.bgLayout || ''; ['headline', 'highlight', 'sub', 'cta', 'prompt', 'bg', 'caption'].forEach((k) => (p[k] = s2[k] || '')); p.hashtags = s2.hashtags || []; c.design = keepSeries(dd); try { await saveCamp(c); } catch (err) { toast(err.message, true); } if (S.page === 'studio' && S.stab === 'campaign') drawCampaign(c); toast('طُبّق على الحملة · إعدادات الشعار والألوان والتذييل صارت موحّدة لكل السلسلة'); } });
+      onApply: async (dd) => { const s2 = dd.slides[0]; p.full = Boolean(s2.full); p.textBy = s2.textBy; p.textCheck = s2.textCheck || null; p.fullSig = s2.fullSig || ''; p.layout = s2.layout || dd.layout || p.layout || 'auto'; p.composite = s2.composite ?? dd.composite; p.pz = s2.pz || null; p.bgLayout = s2.bgLayout || ''; ['headline', 'highlight', 'sub', 'cta', 'prompt', 'bg', 'caption'].forEach((k) => (p[k] = s2[k] || '')); p.hashtags = s2.hashtags || []; c.design = keepSeries(dd); try { await saveCamp(c); } catch (err) { toast(err.message, true); } if (S.page === 'studio' && S.stab === 'campaign') drawCampaign(c); toast('طُبّق على الحملة · إعدادات الشعار والألوان والتذييل صارت موحّدة لكل السلسلة'); } });
   }));
   $('#cstyle', v).onclick = () => designer({ slides: c.posts, aspect: d.aspect, template: d.template, productId: c.productId || '', design: { ...d, noCounter: true }, applyLabel: 'تطبيق على الحملة',
     onApply: async (dd) => { dd.slides.forEach((s2, i) => { const p = c.posts[i]; ['headline', 'highlight', 'sub', 'cta', 'prompt', 'bg', 'caption'].forEach((k) => (p[k] = s2[k] || '')); p.hashtags = s2.hashtags || []; }); c.design = keepSeries(dd); try { await saveCamp(c); } catch (err) { toast(err.message, true); } if (S.page === 'studio' && S.stab === 'campaign') drawCampaign(c); } });
@@ -1874,7 +1874,7 @@ ${(p.hashtags || []).map((h) => '#' + h).join(' ')}`).then(() => toast('نُسخ
         const usesProduct = prod && (['product', 'texture'].includes(p.type) || p.hero);
         if (d.mode === 'full') {
           const img = await fullPostAuto(b, d, p, usesProduct ? prod : null, { campaign: c.id });
-          Object.assign(p, { bg: img.url, full: true, textCheck: img.textCheck || null, fullSig: fullSig(p), layout: img.layout || p.layout, pz: null, composite: false });
+          Object.assign(p, { bg: img.url, full: true, textBy: img.textBy, textCheck: img.textCheck || null, fullSig: fullSig(p), layout: img.layout || p.layout, pz: img.subject || null, composite: false });
           made++; await saveCamp(c);
           const cv = document.querySelector(`[data-cv="${i}"]`); if (cv && S.camp === c.id) { await renderTile(c, p, i, cv); cv.closest('.ctile')?.querySelector('.cw')?.remove(); }
           continue;
@@ -1965,8 +1965,13 @@ function drawStudio() {
   $('#iblank', v).onclick = () => designer({ aspect: aspect(), design: { mode: g.mode }, productId: g.productId, slides: Array.from({ length: n() }, () => ({ prompt: g.prompt })), onSave, idea: g.prompt });
   $('#igo', v).onclick = (e) => busy(e.currentTarget, async () => {
     if (!g.prompt.trim()) return toast('اكتب الفكرة أولاً', true);
+    if (!g.productId && prods.length) {
+      const idea = g.prompt.toLowerCase();
+      const hit = prods.find((p) => p.name && p.name.toLowerCase().split(/\s+/).filter((w) => w.length > 3).some((w) => idea.includes(w))) || (prods.length === 1 ? prods[0] : null);
+      if (hit) { g.productId = hit.id; toast(`اخترنا المنتج «${hit.name}» حتى يظهر منتجك الحقيقي. غيّره من القائمة إن أردت.`); }
+    }
     const sp = prods.find((x) => x.id === g.productId);
-    if (sp && !sp.photo) return productPhotoModal(sp, () => drawStudio());
+    if (sp && !sp.photo) return productPhotoModal(sp, () => { drawStudio(); setTimeout(() => $('#igo')?.click(), 50); });
     try {
       const arch = autoArch(b);
       const r = await api(`/api/brands/${b.id}/design/copy`, { method: 'POST', body: { idea: `${g.kind === 'ad' ? 'Paid ad. ' : ''}${g.prompt}`, productId: g.productId, slides: n(), style: g.mode === 'full' ? arch : undefined, ai: aiOf('text') } });
@@ -2937,7 +2942,7 @@ async function fullPostReq(b, d, s2, prod, from, fixFrom) {
     slide: { headline: s2.headline, highlight: s2.highlight, sub: s2.sub, cta: s2.cta, prompt: s2.prompt }, prompt: s2.prompt,
     productId: prod?.id || undefined, cutoutUrl: prod ? await cutoutUrl(prod) : '', aspect: d.aspect,
     layout: LAYOUT_PREF[d.template] ? pickLayout(d, s2, cut) : undefined, arch: ARCHS.includes(d.template) ? d.template : undefined,
-    footer: d.footer, accent: d.accent, ctaColor: d.color, useLogo: d.showLogo !== false, from, fixFrom, ai: aiOf('image'),
+    footer: d.footer, accent: d.accent, ctaColor: d.color, useLogo: d.showLogo !== false, textBy: d.textBy && d.textBy !== 'auto' ? d.textBy : undefined, from, fixFrom, ai: aiOf('image'),
   } });
 }
 // full post + automatic text correction: when the check finds wrong words, one edit pass fixes only the text
@@ -2972,7 +2977,7 @@ async function renderSlide(canvas, d, sl, i, n) {
   const xSpan = (x, w, align) => (align === 'center' ? [x - w / 2, x + w / 2] : align === 'right' ? [x - w, x] : [x, x + w]);
   ctx.direction = 'rtl'; ctx.textBaseline = 'alphabetic';
   ctx.fillStyle = '#EDEDED'; ctx.fillRect(0, 0, W, H);
-  if (sl.full && bg) { drawCover(ctx, bg, 0, 0, W, H); return { ...qa, full: true }; }
+  if (sl.full && sl.textBy !== 'platform' && bg) { drawCover(ctx, bg, 0, 0, W, H); return { ...qa, full: true }; }
   // One line, with the highlight word boxed (same treatment on every post).
   const line = (text, x, y, align, color, size, hl) => {
     const rtl = hasAr(text); ctx.direction = rtl ? 'rtl' : 'ltr'; ctx.textAlign = align;
@@ -3266,7 +3271,7 @@ function designer(opts = {}) {
     accent: (b.visual?.colors || [])[1] || '#E3262F', footer: brandFooter(b), composite: true, mode: 'full',
     showLogo: Boolean(b.logo?.url) && opts.showLogo !== false, logoPos: 'left', logoPlate: false, size: 'm',
     fontHead: fonts.head, fontBody: fonts.body, productId: opts.productId || '', useProduct: Boolean(opts.productId), useColors: true,
-    slides: (opts.slides && opts.slides.length ? opts.slides : [{ headline: '', sub: '', cta: '', prompt: '' }]).map((x) => ({ headline: x.headline || '', highlight: x.highlight || '', sub: x.sub || '', cta: x.cta || '', prompt: x.prompt || '', bg: x.bg || '', caption: x.caption || '', hashtags: x.hashtags || [], layout: x.layout || '', composite: x.composite, pz: x.pz || null, bgLayout: x.bgLayout || '', full: Boolean(x.full), textCheck: x.textCheck || null, fullSig: x.fullSig || '' })),
+    slides: (opts.slides && opts.slides.length ? opts.slides : [{ headline: '', sub: '', cta: '', prompt: '' }]).map((x) => ({ headline: x.headline || '', highlight: x.highlight || '', sub: x.sub || '', cta: x.cta || '', prompt: x.prompt || '', bg: x.bg || '', caption: x.caption || '', hashtags: x.hashtags || [], layout: x.layout || '', composite: x.composite, pz: x.pz || null, bgLayout: x.bgLayout || '', full: Boolean(x.full), textBy: x.textBy, textCheck: x.textCheck || null, fullSig: x.fullSig || '' })),
     cur: 0,
   };
   Object.entries(opts.design || {}).forEach(([k, v]) => { if (v !== undefined && !['slides', 'cur'].includes(k)) d[k] = v; });
@@ -3276,6 +3281,8 @@ function designer(opts = {}) {
       ${d.slides.length > 1 ? `<div class="dz-strip" id="dzs"></div>` : ''}</div>
       <div class="dz-ctl">
         <div class="inset" style="padding:12px"><span class="lbl" style="margin-top:0">طريقة التصميم</span><div class="opts" id="dzmodeTop">${[['full', '✦ صورة كاملة بالذكاء الاصطناعي'], ['overlay', 'خلفية + نص المنصة']].map(([k, l]) => `<button class="opt ${d.mode === k ? 'on' : ''}" data-mode="${k}">${l}</button>`).join('')}</div>
+          <div id="dztb" ${d.mode === 'full' ? '' : 'hidden'}><span class="lbl">كتابة النص</span><div class="opts">${[['auto', 'تلقائي'], ['platform', 'بخط البراند (مضمون للعربية)'], ['ai', 'بالذكاء الاصطناعي (تجريبي)']].map(([k, l]) => `<button class="opt ${(d.textBy || 'auto') === k ? 'on' : ''}" data-tb="${k}">${l}</button>`).join('')}</div>
+          <p class="hint mt8">نماذج الصور لا تكتب العربية بشكل موثوق. «تلقائي»: النص العربي تكتبه المنصة بخط براندك داخل التصميم، والنص اللاتيني يكتبه الذكاء الاصطناعي.</p></div>
           <button class="btn primary mt12" id="dzgenTop" data-busy="يصمم…" style="width:100%">${ic('sparkle')}${d.mode === 'full' ? 'صمّم المنشور كاملاً' : 'صمّم الخلفية'}</button></div>
         <span class="lbl">النمط والقالب</span><div class="opts" id="dzt">${DTPL.map(([k, l]) => `<button class="opt ${d.template === k ? 'on' : ''}" data-t="${k}">${ARCHS.includes(k) ? '✦ ' : ''}${l}</button>`).join('')}</div>
         <p class="hint mt8" id="dzth">${ARCH_L[d.template] ? esc(ARCH_L[d.template][1]) : ''}</p>
@@ -3339,6 +3346,7 @@ function designer(opts = {}) {
       setTimeout(() => { const fx = $('#dzfix', m); if (fx) fx.onclick = () => busy(fx, async () => { busyOn('يصحح النص العربي…'); try { const s2 = sl(); const prod = b.products.find((p) => p.id === d.productId); const img = await fullPostReq(b, d, s2, prod, opts.from, s2.bg); Object.assign(s2, { bg: img.url, textCheck: img.textCheck || null }); S.images = null; await draw(); if (img.textCheck && !img.textCheck.ok) toast('ما زال في النص خطأ. جرّب مرة أخرى أو استعمل «خلفية + نص المنصة».', true); } catch (err) { toast(err.message, true); } busyOn(''); }); }, 0);
       if (qa.composite && sl().bgLayout && sl().bgLayout !== qa.layout) ql.push([false, `الخلفية صُممت لتخطيط ${sl().bgLayout}: أعد «صمّم الخلفية» حتى تتطابق المنصة مع مكان المنتج`]);
       if (qa.composite) ql.unshift([true, 'صورة المنتج الحقيقية في مكانها المحدد']);
+      if (sl().full && sl().textBy === 'platform') ql.unshift([true, 'التصميم كامل بالذكاء الاصطناعي · النص العربي بخط البراند (حروف صحيحة 100%)']);
       const needFix = qa.full && sl().textCheck && !sl().textCheck.ok;
       $('#dzqa', m).innerHTML = `${needFix ? `<button class="btn grey sm" id="dzfix" style="float:left">${ic('edit')}صحّح النص</button>` : ''}<b class="xs">فحص الجودة ${ql.every((x) => x[0]) ? chip('ممتاز', 'em', false) : chip(`${ql.filter((x) => !x[0]).length} ملاحظة`, 'am', false)}</b>${ql.map(([ok2, tx]) => `<div class="xs mt8" style="color:${ok2 ? 'var(--text-2)' : '#D97706'}">${ok2 ? '✓' : '⚠'} ${esc(tx)}</div>`).join('')}`;
       cv.width = c.width; cv.height = c.height; cv.getContext('2d').drawImage(c, 0, 0);
@@ -3357,8 +3365,10 @@ function designer(opts = {}) {
       $('#dzmodeh', m).textContent = d.mode === 'full' ? 'الذكاء الاصطناعي يصمم المنشور كاملاً دفعة واحدة (المشهد + منتجك + النص + الشعار) حسب دليل التصميم والتخطيط المختار. يُفضّل Gemini (Nano Banana) أو GPT Image. ثم نتحقق من كتابة النص.' : 'الذكاء الاصطناعي يصمم الصورة، والمنصة تكتب النص بخط براندك: الحروف مضمونة 100%.';
       if (d.mode === 'overlay') d.slides.forEach((s3) => { if (s3.full) { s3.full = false; s3.bg = ''; } });
       $('#dzov', m) && ($('#dzov', m).hidden = d.mode === 'full');
+      $('#dztb', m).hidden = d.mode !== 'full';
       draw();
     }));
+    $$('[data-tb]', m).forEach((x) => (x.onclick = () => { d.textBy = x.dataset.tb; $$('[data-tb]', m).forEach((y) => y.classList.toggle('on', y === x)); }));
     $$('[data-comp]', m).forEach((x) => (x.onclick = () => { d.composite = x.dataset.comp === '1'; d.slides.forEach((s3) => { s3.composite = undefined; }); $$('[data-comp]', m).forEach((y) => y.classList.toggle('on', y === x)); draw(); }));
     $$('[data-pos]', m).forEach((x) => (x.onclick = () => { d.layout = x.dataset.pos; $$('[data-pos]', m).forEach((y) => y.classList.toggle('on', y === x)); draw(); }));
     $$('[data-ac]', m).forEach((x) => (x.onclick = () => { d.accent = x.dataset.ac; $$('[data-ac]', m).forEach((y) => y.classList.toggle('on', y === x)); draw(); }));
@@ -3383,7 +3393,7 @@ function designer(opts = {}) {
       if (d.mode === 'full') {
         if (!s2.headline.trim()) throw new Error('اكتب العنوان أولاً أو اضغط «اكتبها لي»');
         const img = await fullPostAuto(b, d, s2, prod, opts.from, (t) => busyOn(t));
-        Object.assign(s2, { bg: img.url, full: true, textCheck: img.textCheck || null, fullSig: fullSig(s2), layout: s2.layout && s2.layout !== 'auto' ? s2.layout : img.layout });
+        Object.assign(s2, { bg: img.url, full: true, textBy: img.textBy, pz: img.subject || null, composite: false, textCheck: img.textCheck || null, fullSig: fullSig(s2), layout: img.layout || s2.layout });
         S.images = null;
         if (img.textCheck && !img.textCheck.ok) toast('الذكاء الاصطناعي لم يكتب النص بشكل صحيح. أعد التوليد، أو استعمل «خلفية + نص المنصة».', true);
         return;
