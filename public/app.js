@@ -20,6 +20,7 @@ function rel(t) {
 }
 
 const P = {
+  grid: '<rect x="3" y="3" width="5" height="5" rx="1"/><rect x="9.5" y="3" width="5" height="5" rx="1"/><rect x="16" y="3" width="5" height="5" rx="1"/><rect x="3" y="9.5" width="5" height="5" rx="1"/><rect x="9.5" y="9.5" width="5" height="5" rx="1"/><rect x="16" y="9.5" width="5" height="5" rx="1"/><rect x="3" y="16" width="5" height="5" rx="1"/><rect x="9.5" y="16" width="5" height="5" rx="1"/><rect x="16" y="16" width="5" height="5" rx="1"/>',
   home: '<path d="M3 11 12 4l9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>',
   brands: '<rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/>',
   brain: '<path d="M9 4a3 3 0 0 0-3 3 3 3 0 0 0-2 5 3 3 0 0 0 2 5 3 3 0 0 0 6 1V5a2 2 0 0 0-3-1zM15 4a3 3 0 0 1 3 3 3 3 0 0 1 2 5 3 3 0 0 1-2 5 3 3 0 0 1-6 1"/>',
@@ -1744,8 +1745,183 @@ PAGES.studio = async () => {
     return;
   }
   if (!S.images) S.images = (await api(`/api/brands/${S.brand.id}/images`)).images;
+  if (S.stab === 'campaign') return drawCampaigns();
   drawStudio();
 };
+
+// ================= CAMPAIGNS (Social Media Post Designer: brief → concept → series plan → grid → QA → export) =================
+const CGOALS = [['launch', 'إطلاق'], ['awareness', 'تعريف'], ['sale', 'تخفيضات'], ['education', 'تعليم']];
+const CTYPES = { model: 'موديل', product: 'منتج', texture: 'ملمس / مشهد', text: 'نصّي' };
+const CPILL = { hero: 'المنتج البطل', benefit: 'الفائدة', howto: 'طريقة الاستعمال', education: 'تعليمي', proof: 'آراء', offer: 'عرض' };
+const CRC = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+const crc32 = (u8) => { let c = 0xFFFFFFFF; for (let i = 0; i < u8.length; i++) c = CRC[(c ^ u8[i]) & 255] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; };
+function zipFiles(files) {
+  const enc = new TextEncoder(); const parts = []; const central = []; let off = 0;
+  for (const f of files) {
+    const name = enc.encode(f.name); const data = typeof f.data === 'string' ? enc.encode(f.data) : f.data; const crc = crc32(data);
+    const h = new DataView(new ArrayBuffer(30));
+    [[0, 0x04034b50, 4], [4, 20, 2], [6, 0x0800, 2], [12, 0x21, 2], [14, crc, 4], [18, data.length, 4], [22, data.length, 4], [26, name.length, 2]].forEach(([o, v, n]) => (n === 4 ? h.setUint32(o, v, true) : h.setUint16(o, v, true)));
+    parts.push(new Uint8Array(h.buffer), name, data);
+    const c = new DataView(new ArrayBuffer(46));
+    [[0, 0x02014b50, 4], [4, 20, 2], [6, 20, 2], [8, 0x0800, 2], [14, 0x21, 2], [16, crc, 4], [20, data.length, 4], [24, data.length, 4], [28, name.length, 2], [42, off, 4]].forEach(([o, v, n]) => (n === 4 ? c.setUint32(o, v, true) : c.setUint16(o, v, true)));
+    central.push(new Uint8Array(c.buffer), name); off += 30 + name.length + data.length;
+  }
+  const cs = central.reduce((a, x) => a + x.length, 0);
+  const e = new DataView(new ArrayBuffer(22)); e.setUint32(0, 0x06054b50, true); e.setUint16(8, files.length, true); e.setUint16(10, files.length, true); e.setUint32(12, cs, true); e.setUint32(16, off, true);
+  return new Blob([...parts, ...central, new Uint8Array(e.buffer)], { type: 'application/zip' });
+}
+const canvasBytes = (c) => new Promise((ok) => c.toBlob(async (bl) => ok(new Uint8Array(await bl.arrayBuffer())), 'image/png'));
+const saveBlob = (blob, name) => { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 4000); };
+const slug = (t) => String(t || 'brand').toLowerCase().replace(/[^a-z0-9\u0600-\u06FF]+/g, '-').replace(/^-|-$/g, '').slice(0, 30) || 'brand';
+
+function campDesign(c) {
+  const b = S.brand; const f = brandFonts();
+  return { template: c.style, aspect: c.aspect, color: (b.visual?.colors || [])[0] || '#000000', accent: (b.visual?.colors || [])[1] || '#E3262F', footer: brandFooter(b), showLogo: Boolean(b.logo?.url), logoPos: 'left', logoPlate: false, size: 'm', fontHead: f.head, fontBody: f.body, productId: c.productId || '', useColors: true, noCounter: true, ...(c.design || {}) };
+}
+async function drawCampaigns() {
+  const b = S.brand;
+  if (!S.camps) { const r = await api(`/api/brands/${b.id}/campaigns`); S.camps = r.campaigns; }
+  if (S.page !== 'studio' || S.stab !== 'campaign') return;
+  const c = S.camps.find((x) => x.id === S.camp);
+  if (c) return drawCampaign(c);
+  const g = (S.cform = S.cform || { count: 9, goal: 'launch', style: 'auto', aspect: '4:5', productId: '', idea: '' });
+  const prods = b.products.filter((p) => p.kind !== 'service');
+  const auto = autoArch(b);
+  const v = view(`${studioTabs()}<div class="grid c12">
+    <div class="card s7"><div class="card-h"><h3>حملة جديدة</h3><div class="end"><span class="muted xs">مفهوم ← خطة السلسلة ← شبكة متناسقة ← فحص الجودة ← تصدير</span></div></div>
+      <span class="lbl" style="margin-top:0">النمط</span>
+      <div class="grid c2" style="gap:8px">${[['auto', `تلقائي · ${ARCH_L[auto][0]}`, 'نختار النمط الأنسب لمجال براندك'], ...ARCHS.map((k) => [k, ARCH_L[k][0], ARCH_L[k][1]])].map(([k, t, dsc]) => `<button class="inset arch ${g.style === k ? 'on' : ''}" data-arch="${k}" style="text-align:start;cursor:pointer"><b class="sm">${esc(t)}</b><div class="xs sec mt8">${esc(dsc)}</div></button>`).join('')}</div>
+      <div class="grid c2 mt12" style="gap:12px"><div><span class="lbl" style="margin-top:0">الهدف</span><div class="opts" data-opts="goal">${CGOALS.map(([k, l]) => `<button class="opt ${g.goal === k ? 'on' : ''}" data-k="${k}">${l}</button>`).join('')}</div></div>
+        <div><span class="lbl" style="margin-top:0">عدد المنشورات</span><div class="opts" data-opts="count">${[6, 9, 12].map((n) => `<button class="opt ${g.count === n ? 'on' : ''}" data-k="${n}">${n}</button>`).join('')}</div></div></div>
+      <span class="lbl">المقاس</span><div class="opts" data-opts="aspect">${[['4:5', 'إنستغرام 4:5'], ['1:1', 'مربع'], ['9:16', 'ستوري']].map(([k, l]) => `<button class="opt ${g.aspect === k ? 'on' : ''}" data-k="${k}">${l}</button>`).join('')}</div>
+      ${prods.length ? `<span class="lbl">المنتج البطل</span><div class="sel"><button class="sel-btn" id="cprod" data-menu><span class="lab">${esc(prods.find((p) => p.id === g.productId)?.name || 'بدون منتج محدد')}</span>${ic('chev')}</button></div>` : ''}
+      <span class="lbl">فكرة الحملة (اختياري)</span>
+      <textarea class="field" id="cidea" data-mic data-enhance="content" rows="3" maxlength="1200" placeholder="مثلاً: إطلاق قناع الكولاجين، عالم وردي، نركّز على بشرة الصباح">${esc(g.idea)}</textarea>
+      <div class="flex mt16" style="justify-content:flex-end"><button class="btn primary" id="cgo" data-job="camp-plan" data-busy="يخطّط الحملة… حتى دقيقة">${ic('sparkle')}خطّط الحملة</button></div>
+    </div>
+    <div class="card s5"><div class="card-h"><h3>حملاتك</h3><div class="end"><span class="muted xs">${S.camps.length}</span></div></div>
+      ${S.camps.length ? `<div class="rows">${S.camps.map((x) => `<div class="row-i" style="cursor:pointer" data-copen="${x.id}"><span class="ic">${ic('grid')}</span><div class="t"><b class="sm">${esc(x.concept?.title || 'حملة')}</b><small>${esc(ARCH_L[x.style]?.[0] || '')} · ${x.posts.length} منشورات · ${x.posts.filter((p) => p.bg).length} مصمّمة · ${rel(x.createdAt)}</small></div><button class="btn grey icon sm" data-cdel="${x.id}" aria-label="حذف">${ic('trash')}</button></div>`).join('')}</div>`
+      : `<div class="empty" style="padding:28px"><span class="ic">${ic('grid')}</span><h3>لا توجد حملات</h3><p>خطّط حملة كاملة: مفهوم واحد، ${g.count} منشورات بأنواع متناوبة، كابشن وهاشتاغات لكل منشور.</p></div>`}
+    </div></div>`);
+  bindOpts(v, g);
+  $$('[data-opts="count"] .opt', v).forEach((x) => x.addEventListener('click', () => (g.count = Number(x.dataset.k))));
+  $$('[data-arch]', v).forEach((x) => (x.onclick = () => { g.style = x.dataset.arch; $$('[data-arch]', v).forEach((y) => y.classList.toggle('on', y === x)); }));
+  $('#cidea', v).oninput = (e) => (g.idea = e.target.value);
+  $('#cprod', v) && ($('#cprod', v).onclick = (e) => openMenu(e.currentTarget, [{ label: 'بدون منتج محدد', selected: !g.productId, onClick: () => { g.productId = ''; drawCampaigns(); } }, ...prods.map((p) => ({ label: p.name, desc: p.photo ? 'صورة المنتج جاهزة' : 'ينقصه صورة', selected: g.productId === p.id, onClick: () => { g.productId = p.id; drawCampaigns(); } }))]));
+  $('#cgo', v).onclick = (e) => busy(e.currentTarget, async () => {
+    const sp = prods.find((x) => x.id === g.productId);
+    if (sp && !sp.photo) return productPhotoModal(sp, () => drawCampaigns());
+    try {
+      const c2 = await api(`/api/brands/${b.id}/campaigns`, { method: 'POST', body: { ...g, style: g.style === 'auto' ? undefined : g.style, ai: aiOf('text') } });
+      S.camps = [c2, ...(S.camps || [])]; S.camp = c2.id;
+      if (S.page === 'studio' && S.stab === 'campaign') drawCampaigns();
+      toast(`خطة «${c2.concept.title}» جاهزة: ${c2.posts.length} منشورات`);
+    } catch (err) { toast(err.message, true); }
+  });
+  $$('[data-copen]', v).forEach((x) => (x.onclick = (e) => { if (e.target.closest('[data-cdel]')) return; S.camp = x.dataset.copen; drawCampaigns(); }));
+  $$('[data-cdel]', v).forEach((x) => (x.onclick = async () => {
+    if (!(await confirmBox('حذف الحملة؟', 'تُحذف الخطة فقط، التصاميم المحفوظة في المعرض تبقى.', 'حذف', true))) return;
+    try { await api(`/api/brands/${b.id}/campaigns/${x.dataset.cdel}`, { method: 'DELETE' }); S.camps = S.camps.filter((y) => y.id !== x.dataset.cdel); drawCampaigns(); } catch (err) { toast(err.message, true); }
+  }));
+}
+async function saveCamp(c, extra = {}) {
+  const r = await api(`/api/brands/${S.brand.id}/campaigns/${c.id}`, { method: 'PUT', body: { posts: c.posts, design: c.design, ...extra } });
+  Object.assign(c, r); return c;
+}
+async function renderTile(c, p, i, cv) {
+  const d = campDesign(c); const full = document.createElement('canvas');
+  const qa = await renderSlide(full, d, p, i, c.posts.length);
+  if (cv) { cv.width = 360; cv.height = Math.round(360 * full.height / full.width); cv.getContext('2d').drawImage(full, 0, 0, cv.width, cv.height); }
+  return { full, qa };
+}
+function drawCampaign(c) {
+  const b = S.brand; const d = campDesign(c);
+  const done = c.posts.filter((p) => p.bg).length;
+  const v = view(`${studioTabs()}
+    <div class="card mb16"><div class="flex wrap" style="gap:8px"><button class="btn ghost sm" id="cback">${ic('chev')}كل الحملات</button><h3 class="grow" style="margin:0">${esc(c.concept.title)}</h3>${chip(ARCH_L[c.style]?.[0] || '', 'vi', false)}${chip(`${done}/${c.posts.length} مصمّمة`, done === c.posts.length ? 'em' : 'am', false)}</div>
+      <div class="grid c4 mt12" style="gap:12px">${[['العالم', c.concept.world], ['اللون', c.concept.color], ['المزاج', c.concept.mood], ['العنصر المتكرر', c.concept.device]].filter(([, x]) => x).map(([k, x]) => `<div><span class="xs muted">${k}</span><p class="sm mt8">${esc(x)}</p></div>`).join('')}</div>
+      <div class="flex wrap mt16" style="gap:8px"><button class="btn primary sm" id="cgen" data-job="camp-gen-${c.id}" data-busy="يصمم الخلفيات…">${ic('sparkle')}${done ? 'صمّم الخلفيات الناقصة' : 'صمّم كل الخلفيات'}</button>
+        <button class="btn grey sm" id="cstyle">${ic('edit')}إعدادات السلسلة</button>
+        <button class="btn grey sm" id="csave" data-job="camp-save-${c.id}" data-busy="يحفظ…">${ic('check')}حفظ الكل في المعرض</button>
+        <button class="btn grey sm" id="czip" data-busy="يجهّز…">${ic('download')}تحميل الكل (ZIP)</button>
+        <button class="btn ghost sm" id="cgrid" data-busy="…">${ic('grid')}صورة الشبكة</button></div></div>
+    <div class="grid c12">
+      <div class="card s7"><div class="card-h"><h3>معاينة الشبكة</h3><div class="end"><span class="muted xs">كما تظهر في إنستغرام · اضغط أي منشور لتعديله</span></div></div>
+        <div class="cgrid" dir="ltr">${c.posts.map((p, i) => `<button class="ctile" data-pi="${i}" title="${esc(p.headline)}"><canvas data-cv="${i}"></canvas><span class="cn">${i + 1}</span><span class="ct">${esc(CTYPES[p.type] || '')}</span>${!p.bg ? '<span class="cw">بدون خلفية</span>' : ''}<span class="cq" data-cq="${i}"></span></button>`).join('')}</div>
+        <p class="hint mt12">ترتيب النشر: انشر رقم ${c.posts.length} أولاً ثم رقم ${c.posts.length - 1}… حتى يكون رقم 1 آخر منشور، فيظهر أعلى يسار حسابك.</p>
+        ${(c.gridNotes || []).length ? `<div class="inset sm mt8">${c.gridNotes.map((x) => `⚠ ${esc(x)}`).join('<br>')}</div>` : `<div class="xs mt8" style="color:var(--text-2)">✓ إيقاع الشبكة: لا يوجد منشوران متشابهان متجاوران</div>`}
+      </div>
+      <div class="card s5"><div class="card-h"><h3>خطة السلسلة</h3></div>
+        <div class="rows">${c.posts.map((p, i) => `<div style="padding:12px 0"><div class="flex wrap" style="gap:6px"><b class="sm">${i + 1}</b>${chip(CTYPES[p.type] || p.type, '', false)}${chip(CPILL[p.pillar] || p.pillar, 'vi', false)}${p.hero ? chip('البطل', 'em', false) : ''}${p.break ? chip('لون مختلف', 'am', false) : ''}</div>
+          <p class="sm mt8"><b>${esc(p.headline)}</b>${p.highlight ? ` · <span style="background:${esc(d.accent)};color:${onColor(d.accent)};padding:0 6px;border-radius:4px">${esc(p.highlight)}</span>` : ''}</p>
+          <p class="xs sec mt8">${esc(p.visual)}</p>
+          ${(p.qa || []).length ? `<p class="xs mt8" style="color:#D97706">⚠ ${esc(p.qa.join(' · '))}</p>` : ''}
+          <details class="mt8"><summary class="xs sec" style="cursor:pointer">الكابشن والهاشتاغات</summary><p class="xs mt8" style="white-space:pre-wrap">${esc(p.caption)}</p><p class="xs muted ltr mt8">${esc((p.hashtags || []).map((h) => '#' + h).join(' '))}</p><button class="btn ghost sm mt8" data-ccopy="${i}">نسخ</button></details></div>`).join('')}</div>
+      </div></div>`);
+  const tiles = async () => { for (let i = 0; i < c.posts.length; i++) { const cv = $(`[data-cv="${i}"]`, v); if (!cv || !cv.isConnected) return; const { qa } = await renderTile(c, c.posts[i], i, cv); const bad = qaList(qa, c.posts[i]).filter((x) => !x[0]).length; const q = $(`[data-cq="${i}"]`, v); if (q) q.textContent = bad ? `⚠ ${bad}` : '✓'; } };
+  tiles();
+  $('#cback', v).onclick = () => { S.camp = null; drawCampaigns(); };
+  $$('[data-ccopy]', v).forEach((x) => (x.onclick = () => { const p = c.posts[Number(x.dataset.ccopy)]; navigator.clipboard?.writeText(`${p.caption}
+
+${(p.hashtags || []).map((h) => '#' + h).join(' ')}`).then(() => toast('نُسخ الكابشن')); }));
+  const keepSeries = (dd) => ({ template: dd.template, aspect: dd.aspect, color: dd.color, accent: dd.accent, footer: dd.footer, showLogo: dd.showLogo, logoPos: dd.logoPos, logoPlate: dd.logoPlate, size: dd.size, productId: c.productId || '' });
+  $$('[data-pi]', v).forEach((x) => (x.onclick = () => {
+    const i = Number(x.dataset.pi); const p = c.posts[i];
+    designer({ slides: [p], aspect: d.aspect, template: d.template, productId: ['product', 'texture'].includes(p.type) || p.hero ? c.productId || '' : '', design: { ...d, noCounter: true }, applyLabel: 'تطبيق على الحملة', idea: p.visual,
+      onApply: async (dd) => { const s2 = dd.slides[0]; ['headline', 'highlight', 'sub', 'cta', 'prompt', 'bg', 'caption'].forEach((k) => (p[k] = s2[k] || '')); p.hashtags = s2.hashtags || []; c.design = keepSeries(dd); try { await saveCamp(c); } catch (err) { toast(err.message, true); } if (S.page === 'studio' && S.stab === 'campaign') drawCampaign(c); toast('طُبّق على الحملة · إعدادات الشعار والألوان والتذييل صارت موحّدة لكل السلسلة'); } });
+  }));
+  $('#cstyle', v).onclick = () => designer({ slides: c.posts, aspect: d.aspect, template: d.template, productId: c.productId || '', design: { ...d, noCounter: true }, applyLabel: 'تطبيق على الحملة',
+    onApply: async (dd) => { dd.slides.forEach((s2, i) => { const p = c.posts[i]; ['headline', 'highlight', 'sub', 'cta', 'prompt', 'bg', 'caption'].forEach((k) => (p[k] = s2[k] || '')); p.hashtags = s2.hashtags || []; }); c.design = keepSeries(dd); try { await saveCamp(c); } catch (err) { toast(err.message, true); } if (S.page === 'studio' && S.stab === 'campaign') drawCampaign(c); } });
+  $('#cgen', v).onclick = (e) => busy(e.currentTarget, async () => {
+    const prod = b.products.find((p) => p.id === c.productId);
+    let made = 0;
+    for (let i = 0; i < c.posts.length; i++) {
+      const p = c.posts[i]; if (p.bg) continue;
+      try {
+        const usesProduct = prod && (['product', 'texture'].includes(p.type) || p.hero);
+        const img = await api(`/api/brands/${b.id}/images`, { method: 'POST', body: { prompt: p.prompt || p.visual, aspect: d.aspect, productId: usesProduct ? prod.id : undefined, useColors: true, arch: c.style, space: SPACE[d.template], style: 'none', enhance: false, from: { campaign: c.id }, ai: aiOf('image') } });
+        p.bg = img.url; made++; await saveCamp(c);
+        const cv = document.querySelector(`[data-cv="${i}"]`); if (cv && S.camp === c.id) { await renderTile(c, p, i, cv); cv.closest('.ctile')?.querySelector('.cw')?.remove(); }
+      } catch (err) { toast(`المنشور ${i + 1}: ${err.message}`, true); }
+    }
+    S.images = null;
+    if (S.page === 'studio' && S.stab === 'campaign' && S.camp === c.id) drawCampaign(c);
+    toast(made ? `صُمّمت ${made} خلفيات` : 'كل المنشورات لها خلفيات');
+  });
+  $('#csave', v).onclick = (e) => busy(e.currentTarget, async () => {
+    if (c.posts.some((p) => !p.bg) && !(await confirmBox('بعض المنشورات بدون خلفية', 'ستُحفظ بخلفية رمادية. صمّم الخلفيات أولاً أو أكمل.', 'حفظ'))) return;
+    const saved = [];
+    for (let i = 0; i < c.posts.length; i++) {
+      const p = c.posts[i]; const { full } = await renderTile(c, p, i);
+      const url = await uploadData(canvasData(full, 'image/jpeg', 0.92));
+      saved.push(await api(`/api/brands/${b.id}/images/design`, { method: 'POST', body: { url, aspect: d.aspect, prompt: p.prompt, productId: c.productId || null, from: { campaign: c.id }, design: { ...d, slides: undefined, slide: p, index: i, total: c.posts.length } } }));
+      p.saved = url;
+    }
+    await saveCamp(c).catch(() => null);
+    S.images = null; toast(`حُفظت ${saved.length} تصاميم في المعرض مع الكابشن · يمكنك جدولتها من المعرض`);
+  });
+  const gridCanvas = async () => {
+    const tiles2 = []; for (let i = 0; i < c.posts.length; i++) tiles2.push((await renderTile(c, c.posts[i], i)).full);
+    const tw = 360; const th = Math.round(tw * tiles2[0].height / tiles2[0].width); const gap = 4; const rows = Math.ceil(tiles2.length / 3);
+    const g = document.createElement('canvas'); g.width = tw * 3 + gap * 2; g.height = th * rows + gap * (rows - 1);
+    const x = g.getContext('2d'); x.fillStyle = '#FFFFFF'; x.fillRect(0, 0, g.width, g.height);
+    tiles2.forEach((t2, i) => x.drawImage(t2, (i % 3) * (tw + gap), Math.floor(i / 3) * (th + gap), tw, th));
+    return { g, tiles2 };
+  };
+  $('#cgrid', v).onclick = (e) => busy(e.currentTarget, async () => { const { g } = await gridCanvas(); g.toBlob((bl) => saveBlob(bl, `${slug(b.name)}_${slug(c.concept.title)}_grid.png`), 'image/png'); });
+  $('#czip', v).onclick = (e) => busy(e.currentTarget, async () => {
+    try {
+      const { g, tiles2 } = await gridCanvas(); const base = `${slug(b.name)}_campaign`;
+      const files = [];
+      for (let i = 0; i < tiles2.length; i++) files.push({ name: `${base}_${String(i + 1).padStart(2, '0')}.png`, data: await canvasBytes(tiles2[i]) });
+      files.push({ name: `${base}_grid.png`, data: await canvasBytes(g) });
+      files.push({ name: 'captions.txt', data: c.posts.map((p, i) => `${String(i + 1).padStart(2, '0')} · ${p.headline}\n\n${p.caption}\n\n${(p.hashtags || []).map((h) => '#' + h).join(' ')}`).join('\n\n────────\n\n') + `\n\nترتيب النشر: انشر ${String(c.posts.length).padStart(2, '0')} أولاً، و 01 آخراً.` });
+      files.push({ name: 'image-prompts.txt', data: c.posts.map((p, i) => `${String(i + 1).padStart(2, '0')}: ${p.prompt}`).join('\n\n') });
+      saveBlob(zipFiles(files), `${base}.zip`);
+    } catch (err) { toast(err.message, true); }
+  });
+}
+drawCampaigns = ((f) => (...a) => (S.page === 'studio' && S.stab === 'campaign' ? f(...a) : undefined))(drawCampaigns);
 function drawStudio() {
   const g = S.img;
   const b = S.brand;
@@ -1793,11 +1969,11 @@ function drawStudio() {
   });
   $$('[data-des]', v).forEach((x) => (x.onclick = () => {
     const im = S.images.find((y) => y.id === x.dataset.des);
-    if (im.kind === 'design' && im.design) { const dd = im.design; designer({ aspect: dd.aspect, template: dd.template, productId: dd.productId, slides: [dd.slide], onSave }); }
+    if (im.kind === 'design' && im.design) { const dd = im.design; designer({ aspect: dd.aspect, template: dd.template, productId: dd.productId, slides: [dd.slide], design: { accent: dd.accent || undefined, footer: dd.footer ?? undefined, color: dd.color || undefined, logoPos: dd.logoPos || 'left', size: dd.size || 'm' }, onSave }); }
     else designer({ aspect: ['1:1', '4:5', '9:16', '16:9'].includes(im.aspect) ? im.aspect : '4:5', productId: im.productId, slides: [{ prompt: im.prompt, bg: im.url }], onSave });
   }));
   $$('[data-iedit]', v).forEach((x) => (x.onclick = () => editModal('image', S.images.find((y) => y.id === x.dataset.iedit))));
-  $$('[data-sch]', v).forEach((x) => (x.onclick = () => { const im = S.images.find((y) => y.id === x.dataset.sch); scheduleModal({ title: (im.design?.slide?.headline || im.prompt || '').slice(0, 80), media: { type: 'image', url: im.url, aspect: im.aspect }, source: { kind: 'image', id: im.id } }); }));
+  $$('[data-sch]', v).forEach((x) => (x.onclick = () => { const im = S.images.find((y) => y.id === x.dataset.sch); scheduleModal({ title: (im.design?.slide?.headline || im.prompt || '').slice(0, 80), caption: [im.design?.slide?.caption, (im.design?.slide?.hashtags || []).map((h) => '#' + h).join(' ')].filter(Boolean).join('\n\n'), media: { type: 'image', url: im.url, aspect: im.aspect }, source: { kind: 'image', id: im.id } }); }));
   $$('[data-anim]', v).forEach((x) => (x.onclick = () => { const im = S.images.find((y) => y.id === x.dataset.anim); Object.assign(S.vid, { imageUrl: '', pendingImage: im.url, aspect: im.aspect === '9:16' || im.aspect === '4:5' ? '9:16' : '16:9', prompt: S.vid.prompt || im.prompt || '' }); S.stab = 'video'; PAGES.studio(); }));
   $$('[data-del]', v).forEach((x) => (x.onclick = async () => {
     if (!(await confirmBox('حذف الصورة؟', 'ستُحذف من المعرض والتخزين.', 'حذف', true))) return;
@@ -1806,7 +1982,7 @@ function drawStudio() {
 }
 
 function studioTabs() {
-  return `<div class="stabs" role="tablist">${[['image', 'studio', 'تصميم', 'منشورات، كاروسيل، ستوري، إعلانات'], ['video', 'play', 'فيديو', 'ريلز وإعلانات فيديو بالصوت']].map(([k, i, t, d]) => `<button class="stab ${S.stab === k ? 'on' : ''}" data-stab="${k}" role="tab" aria-selected="${S.stab === k}">${ic(i)}<span><b>${t}</b><small>${d}</small></span></button>`).join('')}</div>`;
+  return `<div class="stabs" role="tablist">${[['image', 'studio', 'تصميم', 'منشورات، كاروسيل، ستوري، إعلانات'], ['campaign', 'grid', 'حملة', 'خطة 9 منشورات وشبكة متناسقة'], ['video', 'play', 'فيديو', 'ريلز وإعلانات فيديو بالصوت']].map(([k, i, t, d]) => `<button class="stab ${S.stab === k ? 'on' : ''}" data-stab="${k}" role="tab" aria-selected="${S.stab === k}">${ic(i)}<span><b>${t}</b><small>${d}</small></span></button>`).join('')}</div>`;
 }
 document.addEventListener('click', (e) => { const b = e.target.closest('[data-stab]'); if (!b) return; S.stab = b.dataset.stab; PAGES.studio(); });
 
@@ -2513,8 +2689,15 @@ PAGES.insights = async () => {
 // The AI makes a clean background (no text); the platform writes the real text, logo and CTA on top
 // with the brand fonts and colours (canvas), so Arabic is always correct and editable.
 const DSIZE = { '1:1': [1080, 1080], '4:5': [1080, 1350], '9:16': [1080, 1920], '16:9': [1920, 1080] };
-const DTPL = [['bottom', 'نص أسفل الصورة'], ['top', 'شريط علوي'], ['card', 'بطاقة في الوسط'], ['split', 'نصف صورة · نصف لون'], ['clean', 'صورة فقط + شعار']];
-const SPACE = { bottom: 'bottom', top: 'top', card: 'center', split: 'side', clean: '' };
+const DTPL = [['mono', 'عالم بلون واحد'], ['glow', 'توهّج ناعم'], ['street', 'ستريت بوب'], ['bottom', 'نص أسفل الصورة'], ['top', 'شريط علوي'], ['card', 'بطاقة في الوسط'], ['split', 'نصف صورة · نصف لون'], ['clean', 'صورة فقط + شعار']];
+const ARCHS = ['mono', 'glow', 'street'];
+const ARCH_L = { mono: ['عالم بلون واحد', 'الحملة كلها داخل لون البراند، المنتج بطل كل منشور في مشهد مختلف، كلمة مميّزة في مربع'], glow: ['توهّج ناعم', 'ألوان وردية دافئة وإضاءة ناعمة، عنوان كبير في الوسط وزر ورابط الموقع'], street: ['ستريت بوب', 'لقطة شارع مرحة بعدسة واسعة، نص قليل كملصق في الزاوية'] };
+function autoArch(b) {
+  const t = [b.fields?.industry?.value, b.fields?.audience?.value, ...(b.products || []).slice(0, 8).map((p) => p.name)].join(' ').toLowerCase();
+  return /skin|beauty|cosmet|serum|cream|makeup|perfume|عناية|بشرة|تجميل|كريم|سيروم|مكياج|عطر/.test(t) ? 'glow' : /app|tech|street|fashion|sneaker|تطبيق|موضة|أزياء/.test(t) ? 'street' : 'mono';
+}
+function brandFooter(b) { const h = b.socials?.instagram || b.fields?.instagram?.value || ''; if (h) return '@' + String(h).replace(/^.*instagram\.com\//, '').replace(/[@/]/g, ''); return String(b.website || '').replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, ''); }
+const SPACE = { mono: 'top', glow: 'top', street: 'corner', bottom: 'bottom', top: 'top', card: 'center', split: 'side', clean: '' };
 const sameOrigin = (u) => (!u ? '' : /^\/api\//.test(u) || u.startsWith('data:') ? u : `/api/brands/${S.brand.id}/proxy?u=${encodeURIComponent(u)}`);
 const IMGC = new Map();
 function loadImg(u) {
@@ -2534,7 +2717,8 @@ function wrapLines(ctx, text, maxW) {
 }
 function fitText(ctx, text, font, weight, maxW, startSize, maxLines) {
   let size = startSize;
-  for (; size > 18; size -= 2) { ctx.font = `${weight} ${size}px "${font}", "Thmanyah Sans", system-ui, sans-serif`; const l = wrapLines(ctx, text, maxW); if (l.length <= maxLines) return { size, lines: l }; }
+  const floor = Math.max(16, Math.round(ctx.canvas.width * 22 / 1080));
+  for (; size > floor; size -= 2) { ctx.font = `${weight} ${size}px "${font}", "Thmanyah Sans", system-ui, sans-serif`; const l = wrapLines(ctx, text, maxW); if (l.length <= maxLines) return { size, lines: l }; }
   ctx.font = `${weight} ${size}px "${font}", "Thmanyah Sans", system-ui, sans-serif`;
   return { size, lines: wrapLines(ctx, text, maxW).slice(0, maxLines) };
 }
@@ -2546,6 +2730,19 @@ function drawCover(ctx, im, x, y, w, h) {
   ctx.drawImage(im, x + (w - iw) / 2, y + (h - ih) / 2, iw, ih); ctx.restore();
 }
 function rr(ctx, x, y, w, h, r) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
+const hasAr = (t) => /[؀-ۿ]/.test(t || '');
+const contrast = (l1, l2) => (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+// Average luminance of a canvas region (to choose readable text colour and check 4.5:1).
+function regionLum(ctx, x, y, w, h) {
+  try {
+    const W = ctx.canvas.width; const H = ctx.canvas.height;
+    x = Math.max(0, Math.floor(x)); y = Math.max(0, Math.floor(y)); w = Math.max(1, Math.min(W - x, Math.floor(w))); h = Math.max(1, Math.min(H - y, Math.floor(h)));
+    const px = ctx.getImageData(x, y, w, h).data; let sum = 0; let k = 0; const step = Math.max(4, Math.floor(px.length / 4 / 4000)) * 4;
+    for (let i = 0; i < px.length; i += step) { const [r, g, bb] = [px[i], px[i + 1], px[i + 2]].map((c) => { c /= 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; }); sum += 0.2126 * r + 0.7152 * g + 0.0722 * bb; k++; }
+    return k ? sum / k : 0.5;
+  } catch { return 0.5; }
+}
+const shade = (hex, f) => { const h = String(hex || '#000000').replace('#', ''); return '#' + [0, 2, 4].map((i) => Math.max(0, Math.min(255, Math.round(parseInt(h.slice(i, i + 2), 16) * f))).toString(16).padStart(2, '0')).join(''); };
 async function renderSlide(canvas, d, sl, i, n) {
   const [W, H] = DSIZE[d.aspect] || DSIZE['1:1'];
   canvas.width = W; canvas.height = H;
@@ -2554,26 +2751,124 @@ async function renderSlide(canvas, d, sl, i, n) {
   try { await Promise.all([document.fonts.load(`700 40px "${hf}"`), document.fonts.load(`400 40px "${bf}"`)]); } catch { /* fallback fonts */ }
   const [bg, logo] = await Promise.all([loadImg(sl.bg), d.showLogo ? loadImg(S.brand.logo?.url) : null]);
   const C = d.color || '#000000'; const CT = onColor(C);
-  const P = Math.round(Math.min(W, H) * 0.07);
+  const ACC = d.accent || '#E3262F'; const ACT = onColor(ACC);
+  const P = Math.round(W * 0.067);
+  const story = d.aspect === '9:16';
+  const TOP = story ? Math.round(H * 250 / 1920) : P; const BOT = story ? Math.round(H * 340 / 1920) : P;
+  const qa = { minFont: 999, contrast: [], highlight: 0, words: String(sl.headline || '').trim().split(/\s+/).filter(Boolean).length, inSafe: true };
+  const used = (px) => { qa.minFont = Math.min(qa.minFont, px * 1080 / W); };
   ctx.direction = 'rtl'; ctx.textBaseline = 'alphabetic';
   ctx.fillStyle = '#EDEDED'; ctx.fillRect(0, 0, W, H);
   const scale = { s: 0.85, m: 1, l: 1.18 }[d.size || 'm'];
-  const head = (text, color, x, y, maxW, base, lines, align = 'right') => { ctx.textAlign = align; ctx.fillStyle = color; const f = fitText(ctx, text, hf, 700, maxW, Math.round(base * scale), lines); f.lines.forEach((l, k) => ctx.fillText(l, x, y + k * f.size * 1.18)); return y + (f.lines.length - 1) * f.size * 1.18 + f.size * 0.35; };
-  const para = (text, color, x, y, maxW, base, lines, align = 'right') => { if (!text) return y; ctx.textAlign = align; ctx.fillStyle = color; const f = fitText(ctx, text, bf, 400, maxW, Math.round(base * scale), lines); f.lines.forEach((l, k) => ctx.fillText(l, x, y + k * f.size * 1.4)); return y + (f.lines.length - 1) * f.size * 1.4 + f.size * 0.4; };
-  const pill = (text, x, y, align = 'right', inv = false) => {
-    if (!text) return;
-    ctx.font = `700 ${Math.round(W * 0.034 * scale)}px "${hf}", "Thmanyah Sans", sans-serif`;
-    const tw = ctx.measureText(text).width; const ph = W * 0.034 * scale * 2.1; const pw = tw + ph * 1.1;
+  // One line, with the highlight word boxed (same treatment on every post).
+  const line = (text, x, y, align, color, size, hl) => {
+    const rtl = hasAr(text); ctx.direction = rtl ? 'rtl' : 'ltr';
+    ctx.textAlign = align; ctx.fillStyle = color; ctx.fillText(text, x, y);
+    const at = hl ? text.indexOf(hl) : -1;
+    if (at < 0) return;
+    qa.highlight++;
+    const lw = ctx.measureText(text).width; const wb = ctx.measureText(text.slice(0, at)).width; const wh = ctx.measureText(hl).width;
+    const left = align === 'center' ? x - lw / 2 : align === 'right' ? x - lw : x;
+    const hx = rtl ? left + lw - wb - wh : left + wb;
+    const px = size * 0.22; const py = size * 0.12;
+    ctx.fillStyle = ACC; rr(ctx, hx - px, y - size * 0.86 - py, wh + px * 2, size * 1.12 + py * 2, size * 0.1); ctx.fill();
+    ctx.fillStyle = ACT; ctx.textAlign = rtl ? 'right' : 'left'; ctx.fillText(hl, rtl ? hx + wh : hx, y);
+  };
+  const head = (text, color, x, y, maxW, base, lines, align = 'right') => {
+    const f = fitText(ctx, text, hf, 700, maxW, Math.round(base * scale), lines); used(f.size);
+    const hl = String(sl.highlight || '').trim();
+    f.lines.forEach((l, k) => line(l, x, y + k * f.size * 1.22, align, color, f.size, hl && l.includes(hl) ? hl : ''));
+    return y + (f.lines.length - 1) * f.size * 1.22 + f.size * 0.35;
+  };
+  const para = (text, color, x, y, maxW, base, lines, align = 'right') => { if (!text) return y; ctx.direction = hasAr(text) ? 'rtl' : 'ltr'; ctx.textAlign = align; ctx.fillStyle = color; const f = fitText(ctx, text, bf, 400, maxW, Math.round(base * scale), lines); used(f.size); f.lines.forEach((l, k) => ctx.fillText(l, x, y + k * f.size * 1.4)); return y + (f.lines.length - 1) * f.size * 1.4 + f.size * 0.4; };
+  const pill = (text, x, y, align = 'right', inv = false, colors) => {
+    if (!text) return 0;
+    const fs = Math.round(W * 0.032 * scale); used(fs);
+    ctx.font = `700 ${fs}px "${hf}", "Thmanyah Sans", sans-serif`; ctx.direction = hasAr(text) ? 'rtl' : 'ltr';
+    const tw = ctx.measureText(text).width; const ph = fs * 2.1; const pw = tw + ph * 1.1;
     const px = align === 'right' ? x - pw : align === 'center' ? x - pw / 2 : x;
-    ctx.fillStyle = inv ? CT : C; rr(ctx, px, y, pw, ph, ph / 2); ctx.fill();
-    ctx.fillStyle = inv ? C : CT; ctx.textAlign = 'center'; ctx.fillText(text, px + pw / 2, y + ph * 0.66);
+    ctx.fillStyle = colors ? colors[0] : inv ? CT : C; rr(ctx, px, y, pw, ph, ph / 2); ctx.fill();
+    ctx.fillStyle = colors ? colors[1] : inv ? C : CT; ctx.textAlign = 'center'; ctx.fillText(text, px + pw / 2, y + ph * 0.66);
+    return ph;
+  };
+  // Text colour that reads best on the photo region; soft scrim when even the best is under 4.5:1.
+  const readable = (x, y, w, h, prefer) => {
+    const L = regionLum(ctx, x, y, w, h);
+    const cands = [prefer, '#FFFFFF', '#111111'].filter(Boolean);
+    let best = cands[0]; let bc = 0;
+    for (const c of cands) { const cr = contrast(lum(c), L); if (cr >= 4.5 && c === prefer) return { color: c, cr }; if (cr > bc) { bc = cr; best = c; } }
+    if (bc < 4.5) {
+      const dark = lum(best) > 0.5;
+      const g = ctx.createLinearGradient(0, y, 0, y + h);
+      const a = dark ? 'rgba(0,0,0,' : 'rgba(255,255,255,';
+      g.addColorStop(0, a + '0)'); g.addColorStop(0.25, a + '.55)'); g.addColorStop(0.75, a + '.55)'); g.addColorStop(1, a + '0)');
+      ctx.fillStyle = g; ctx.fillRect(0, y, W, h);
+      bc = contrast(lum(best), regionLum(ctx, x, y, w, h));
+    }
+    return { color: best, cr: bc };
   };
   const t = d.template;
-  if (t === 'split') {
+  const footer = d.footer || '';
+  const drawFooter = (pos, color) => {
+    if (!footer) return;
+    const fs = Math.round(W * 0.024); used(fs);
+    ctx.font = `600 ${fs}px "${bf}", "Thmanyah Sans", sans-serif`; ctx.direction = 'ltr';
+    if (pos === 'pill') {
+      const tw = ctx.measureText(footer).width; const ph = fs * 2; const pw = tw + ph;
+      ctx.fillStyle = 'rgba(255,255,255,.94)'; rr(ctx, (W - pw) / 2, H - BOT - ph, pw, ph, ph / 2); ctx.fill();
+      ctx.fillStyle = '#1A1A1A'; ctx.textAlign = 'center'; ctx.fillText(footer, W / 2, H - BOT - ph * 0.32);
+    } else { ctx.fillStyle = color; ctx.textAlign = 'left'; ctx.fillText(footer, P, H - BOT); }
+  };
+  let logoAt = null;
+  if (ARCHS.includes(t)) {
+    drawCover(ctx, bg, 0, 0, W, H);
+    const ar = hasAr(sl.headline || sl.sub || 'ع');
+    const xA = ar ? W - P : P; const al = ar ? 'right' : 'left';
+    if (t === 'mono') {
+      // fixed frame: logo top-left, headline zone under it, handle footer bottom-left
+      logoAt = 'tl';
+      const y0 = TOP + W * 0.2;
+      const zone = readable(P, y0 - W * 0.1, W - P * 2, W * 0.36, '#FFFFFF');
+      qa.contrast.push(zone.cr);
+      let y = head(sl.headline, zone.color, xA, y0, W - P * 2, W * 0.088, 3, al);
+      y = para(sl.sub, zone.color, xA, y + W * 0.05, W - P * 2, W * 0.034, 2, al);
+      if (sl.cta) pill(sl.cta, ar ? P : W - P, H - BOT - W * 0.075, ar ? 'left' : 'right');
+      const fz = readable(P, H - BOT - W * 0.04, W * 0.5, W * 0.05, '#FFFFFF');
+      drawFooter('text', fz.color);
+    } else if (t === 'glow') {
+      logoAt = 'tc';
+      // 1-3 soft decorative circles (never cluttered)
+      ctx.save(); [[0.12, 0.2, 0.05], [0.9, 0.34, 0.035], [0.84, 0.78, 0.028]].slice(0, 2 + (i % 2)).forEach(([cx, cy, r]) => { const g = ctx.createRadialGradient(W * cx, H * cy, 0, W * cx, H * cy, W * r * 2.2); g.addColorStop(0, 'rgba(255,255,255,.7)'); g.addColorStop(1, 'rgba(255,255,255,0)'); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(W * cx, H * cy, W * r * 2.2, 0, 7); ctx.fill(); }); ctx.restore();
+      const y0 = TOP + W * 0.26;
+      const deep = lum(C) < 0.3 ? C : shade(C, 0.55);
+      const zone = readable(P, y0 - W * 0.1, W - P * 2, W * 0.4, deep);
+      qa.contrast.push(zone.cr);
+      let y = head(sl.headline, zone.color, W / 2, y0, W - P * 2.4, W * 0.09, 3, 'center');
+      y = para(sl.sub, zone.color, W / 2, y + W * 0.05, W - P * 3, W * 0.034, 2, 'center');
+      if (sl.cta) pill(sl.cta, W / 2, y + W * 0.035, 'center', false, [deep, '#FFFFFF']);
+      drawFooter('pill');
+    } else {
+      // street: one sticker-style line in a top corner, logo small bottom
+      logoAt = 'bl';
+      const fs = Math.round(W * 0.06 * scale);
+      const f = fitText(ctx, sl.headline, hf, 700, W * 0.62, fs, 2); used(f.size);
+      const lw = Math.max(...f.lines.map((l) => ctx.measureText(l).width)); const bh = f.lines.length * f.size * 1.25 + f.size * 0.6;
+      const bx = ar ? W - P - lw - f.size : P; const by = TOP;
+      let SC = C; const ST = '#FFFFFF';
+      for (let k = 0; k < 10 && contrast(lum(ST), lum(SC)) < 4.5; k++) SC = shade(SC, 0.86);
+      ctx.save(); ctx.translate(bx + (lw + f.size) / 2, by + bh / 2); ctx.rotate(ar ? 0.035 : -0.035); ctx.fillStyle = SC; rr(ctx, -(lw + f.size) / 2, -bh / 2, lw + f.size, bh, f.size * 0.25); ctx.fill(); ctx.restore();
+      const hl = String(sl.highlight || '').trim();
+      f.lines.forEach((l, k) => line(l, ar ? bx + lw + f.size / 2 : bx + f.size / 2, by + f.size * 1.15 + k * f.size * 1.25, ar ? 'right' : 'left', ST, f.size, hl && l.includes(hl) ? hl : ''));
+      qa.contrast.push(contrast(lum(ST), lum(SC)));
+      const fz = readable(W * 0.4, H - BOT - W * 0.04, W * 0.6 - P, W * 0.05, '#FFFFFF');
+      if (footer) { const fs2 = Math.round(W * 0.024); used(fs2); ctx.font = `600 ${fs2}px "${bf}", sans-serif`; ctx.direction = 'ltr'; ctx.textAlign = 'right'; ctx.fillStyle = fz.color; ctx.fillText(footer, W - P, H - BOT); }
+    }
+  } else if (t === 'split') {
     const land = W > H;
     const iw = land ? W * 0.5 : W; const ih = land ? H : H * 0.56;
     drawCover(ctx, bg, 0, 0, iw, ih);
     ctx.fillStyle = C; ctx.fillRect(land ? iw : 0, land ? 0 : ih, land ? W - iw : W, land ? H : H - ih);
+    qa.contrast.push(contrast(lum(CT), lum(C)));
     const x0 = W - P; const top = land ? H * 0.28 : ih + P * 1.2; const mw = (land ? W - iw : W) - P * 2;
     let y = head(sl.headline, CT, x0, top + W * 0.06, mw, W * (land ? 0.05 : 0.075), 3);
     y = para(sl.sub, CT, x0, y + W * 0.045, mw, W * (land ? 0.026 : 0.036), 3);
@@ -2583,43 +2878,60 @@ async function renderSlide(canvas, d, sl, i, n) {
     if (t === 'bottom') {
       const g = ctx.createLinearGradient(0, H * 0.38, 0, H); g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,.78)');
       ctx.fillStyle = g; ctx.fillRect(0, H * 0.38, W, H * 0.62);
-      ctx.font = `700 ${W * 0.075}px "${hf}"`;
-      const hl = fitText(ctx, sl.headline, hf, 700, W - P * 2, Math.round(W * 0.078 * scale), 3);
+      const hl0 = fitText(ctx, sl.headline, hf, 700, W - P * 2, Math.round(W * 0.078 * scale), 3);
       const subH = sl.sub ? W * 0.04 * 3 : 0; const ctaH = sl.cta ? W * 0.08 : 0;
-      let y = H - P - ctaH - subH - (hl.lines.length - 1) * hl.size * 1.18;
+      let y = H - BOT - ctaH - subH - (hl0.lines.length - 1) * hl0.size * 1.22;
+      qa.contrast.push(contrast(1, regionLum(ctx, P, y - hl0.size, W - P * 2, hl0.size * 2)));
       y = head(sl.headline, '#FFFFFF', W - P, y, W - P * 2, W * 0.078, 3);
       y = para(sl.sub, 'rgba(255,255,255,.88)', W - P, y + W * 0.045, W - P * 2, W * 0.036, 2);
       pill(sl.cta, W - P, y + W * 0.03);
     } else if (t === 'top') {
       const bandH = H * (W > H ? 0.42 : 0.34);
       ctx.fillStyle = C; ctx.fillRect(0, 0, W, bandH);
-      let y = head(sl.headline, CT, W - P, P + W * 0.08 + (d.showLogo && d.logoPos !== 'bottom' ? W * 0.02 : 0), W - P * 2 - (d.showLogo ? W * 0.16 : 0), W * 0.07, 2);
+      qa.contrast.push(contrast(lum(CT), lum(C)));
+      const y = head(sl.headline, CT, W - P, TOP + W * 0.08 + (d.showLogo && d.logoPos !== 'bottom' ? W * 0.02 : 0), W - P * 2 - (d.showLogo ? W * 0.16 : 0), W * 0.07, 2);
       para(sl.sub, CT, W - P, y + W * 0.045, W - P * 2, W * 0.034, 2);
-      pill(sl.cta, W - P, H - P - W * 0.075);
+      pill(sl.cta, W - P, H - BOT - W * 0.075);
     } else if (t === 'card') {
       const cw = W * 0.82; const cx = (W - cw) / 2;
-      ctx.font = `700 ${W * 0.066}px "${hf}"`;
-      const hl = fitText(ctx, sl.headline, hf, 700, cw - P * 1.4, Math.round(W * 0.066 * scale), 3);
-      const ch = P * 1.4 + hl.lines.length * hl.size * 1.18 + (sl.sub ? W * 0.12 : 0) + (sl.cta ? W * 0.1 : 0);
+      const hl0 = fitText(ctx, sl.headline, hf, 700, cw - P * 1.4, Math.round(W * 0.066 * scale), 3);
+      const ch = P * 1.4 + hl0.lines.length * hl0.size * 1.22 + (sl.sub ? W * 0.12 : 0) + (sl.cta ? W * 0.1 : 0);
       const cy = (H - ch) / 2;
       ctx.save(); ctx.shadowColor = 'rgba(0,0,0,.18)'; ctx.shadowBlur = 40; ctx.fillStyle = 'rgba(255,255,255,.94)'; rr(ctx, cx, cy, cw, ch, W * 0.035); ctx.fill(); ctx.restore();
-      let y = head(sl.headline, '#0A0A0A', W / 2, cy + P * 0.7 + hl.size, cw - P * 1.4, W * 0.066, 3, 'center');
+      qa.contrast.push(contrast(lum('#0A0A0A'), lum('#F2F2F2')));
+      let y = head(sl.headline, '#0A0A0A', W / 2, cy + P * 0.7 + hl0.size, cw - P * 1.4, W * 0.066, 3, 'center');
       y = para(sl.sub, '#404040', W / 2, y + W * 0.045, cw - P * 1.4, W * 0.032, 2, 'center');
       pill(sl.cta, W / 2, y + W * 0.03, 'center');
     }
+    if (footer && t !== 'clean') { const fz = readable(P, H - BOT - W * 0.04, W * 0.45, W * 0.05, '#FFFFFF'); if (t !== 'bottom' || !sl.cta) drawFooter('text', fz.color); }
   }
   if (logo) {
-    const lw = W * 0.15; const lh = (logo.height / logo.width) * lw;
-    const lx = d.logoPos === 'right' ? W - P - lw : P; const ly = d.logoPos === 'bottom' ? H - P - lh : P;
-    if (d.logoPlate) { ctx.fillStyle = 'rgba(255,255,255,.92)'; rr(ctx, lx - lw * 0.08, ly - lw * 0.08, lw * 1.16, lh + lw * 0.16, lw * 0.08); ctx.fill(); }
-    ctx.drawImage(logo, lx, ly, lw, lh);
+    const lw = W * 0.15; const lh = Math.min((logo.height / logo.width) * lw, W * 0.15);
+    const lw2 = (logo.width / logo.height) * lh;
+    const pos = logoAt || (d.logoPos === 'right' ? 'tr' : d.logoPos === 'bottom' ? 'bl' : 'tl');
+    const lx = pos === 'tc' ? (W - lw2) / 2 : pos === 'tr' ? W - P - lw2 : P; const ly = pos === 'bl' ? H - BOT - lh : TOP;
+    if (d.logoPlate) { ctx.fillStyle = 'rgba(255,255,255,.92)'; rr(ctx, lx - lw2 * 0.08, ly - lw2 * 0.08, lw2 * 1.16, lh + lw2 * 0.16, lw2 * 0.08); ctx.fill(); }
+    ctx.drawImage(logo, lx, ly, lw2, lh);
   }
-  if (n > 1) {
-    ctx.font = `700 ${W * 0.026}px "${hf}", sans-serif`; ctx.textAlign = 'left'; ctx.direction = 'ltr';
+  if (n > 1 && !d.noCounter) {
+    const fs = Math.round(W * 0.024); ctx.font = `700 ${fs}px "${hf}", sans-serif`; ctx.textAlign = 'left'; ctx.direction = 'ltr';
     const txt = `${i + 1}/${n}`; const tw = ctx.measureText(txt).width + W * 0.03;
-    ctx.fillStyle = 'rgba(0,0,0,.45)'; rr(ctx, P, H - P - W * 0.05, tw, W * 0.05, W * 0.025); ctx.fill();
-    ctx.fillStyle = '#fff'; ctx.fillText(txt, P + W * 0.015, H - P - W * 0.015); ctx.direction = 'rtl';
+    const yy = footer ? TOP : H - BOT - W * 0.05; const xx = footer ? W - P - tw : P;
+    ctx.fillStyle = 'rgba(0,0,0,.45)'; rr(ctx, xx, yy, tw, W * 0.05, W * 0.025); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.fillText(txt, xx + W * 0.015, yy + W * 0.036); ctx.direction = 'rtl';
   }
+  return qa;
+}
+// QA checklist (from the Social Media Post Designer rules) for one rendered post.
+function qaList(qa, sl) {
+  const out = [];
+  out.push([qa.words >= 4 && qa.words <= 8, `العنوان ${qa.words} كلمات (4-8)`]);
+  out.push([qa.highlight === 1 || !sl.highlight ? Boolean(sl.highlight) : false, sl.highlight ? (qa.highlight ? 'كلمة مميّزة واحدة في مربع' : 'الكلمة المميّزة غير موجودة في العنوان') : 'لا توجد كلمة مميّزة']);
+  const cr = qa.contrast.length ? Math.min(...qa.contrast) : 21;
+  out.push([cr >= 4.5, `تباين النص ${cr.toFixed(1)}:1 (4.5 على الأقل)`]);
+  out.push([qa.minFont >= 22 || qa.minFont === 999, `أصغر نص ${qa.minFont === 999 ? '—' : Math.round(qa.minFont)}px (22 على الأقل)`]);
+  if (/(يعالج|علاج|يشفي|شفاء|يقضي على|cure|heal)/i.test(`${sl.headline} ${sl.sub}`)) out.push([false, 'ادعاء علاجي: خفّفه (يساعد، يمنح إحساساً…)']);
+  return out;
 }
 const canvasData = (c, type = 'image/png', q = 0.92) => c.toDataURL(type, q);
 async function uploadData(dataUrl) { return (await api(`/api/brands/${S.brand.id}/uploads`, { method: 'POST', body: { dataUrl } })).url; }
@@ -2640,23 +2952,28 @@ function designer(opts = {}) {
   const fonts = brandFonts();
   if (fonts.head !== 'Thmanyah Sans') loadGFonts([fonts.head, fonts.body]);
   const d = {
-    aspect: opts.aspect || '4:5', template: opts.template || 'bottom', color: (b.visual?.colors || [])[0] || '#000000',
+    aspect: opts.aspect || '4:5', template: opts.template || autoArch(b), color: (b.visual?.colors || [])[0] || '#000000',
+    accent: (b.visual?.colors || [])[1] || '#E3262F', footer: brandFooter(b),
     showLogo: Boolean(b.logo?.url) && opts.showLogo !== false, logoPos: 'left', logoPlate: false, size: 'm',
     fontHead: fonts.head, fontBody: fonts.body, productId: opts.productId || '', useProduct: Boolean(opts.productId), useColors: true,
-    slides: (opts.slides && opts.slides.length ? opts.slides : [{ headline: '', sub: '', cta: '', prompt: '' }]).map((x) => ({ headline: x.headline || '', sub: x.sub || '', cta: x.cta || '', prompt: x.prompt || '', bg: x.bg || '' })),
+    slides: (opts.slides && opts.slides.length ? opts.slides : [{ headline: '', sub: '', cta: '', prompt: '' }]).map((x) => ({ headline: x.headline || '', highlight: x.highlight || '', sub: x.sub || '', cta: x.cta || '', prompt: x.prompt || '', bg: x.bg || '', caption: x.caption || '', hashtags: x.hashtags || [] })),
     cur: 0,
   };
+  Object.entries(opts.design || {}).forEach(([k, v]) => { if (v !== undefined && !['slides', 'cur'].includes(k)) d[k] = v; });
   const prods = b.products.filter((p) => p.kind !== 'service');
-  modal(`<div class="flex"><h2 class="grow">تصميم ${d.slides.length > 1 ? `كاروسيل (${d.slides.length} شرائح)` : 'المنشور'}</h2><span class="muted xs">النص والشعار يُكتبان بخط براندك، والخلفية بالذكاء الاصطناعي</span></div>
+  modal(`<div class="flex"><h2 class="grow">تصميم ${d.slides.length > 1 ? `كاروسيل (${d.slides.length} شرائح)` : 'المنشور'}</h2><span class="muted xs">حسب دليل تصميم السوشيال ميديا · النص والشعار بخط براندك</span></div>
     <div class="dz mt12"><div class="dz-prev"><div class="dz-stage"><canvas id="dzc"></canvas><div class="dz-busy" id="dzb" hidden><span class="spin"></span><span id="dzbt">يصمم الخلفية…</span></div></div>
       ${d.slides.length > 1 ? `<div class="dz-strip" id="dzs"></div>` : ''}</div>
       <div class="dz-ctl">
-        <span class="lbl" style="margin-top:0">القالب</span><div class="opts" id="dzt">${DTPL.map(([k, l]) => `<button class="opt ${d.template === k ? 'on' : ''}" data-t="${k}">${l}</button>`).join('')}</div>
+        <span class="lbl" style="margin-top:0">النمط والقالب</span><div class="opts" id="dzt">${DTPL.map(([k, l]) => `<button class="opt ${d.template === k ? 'on' : ''}" data-t="${k}">${ARCHS.includes(k) ? '✦ ' : ''}${l}</button>`).join('')}</div>
+        <p class="hint mt8" id="dzth">${ARCH_L[d.template] ? esc(ARCH_L[d.template][1]) : ''}</p>
         <span class="lbl">المقاس</span><div class="opts" id="dza">${[['1:1', 'مربع'], ['4:5', 'عمودي'], ['9:16', 'ستوري'], ['16:9', 'عرضي']].map(([k, l]) => `<button class="opt ${d.aspect === k ? 'on' : ''}" data-a="${k}">${l}</button>`).join('')}</div>
         <div class="flex mt12"><span class="lbl grow" style="margin:0">النصوص <span class="muted xs" id="dzn"></span></span><button class="btn ghost sm" id="dzcopy" data-busy="يكتب…">${ic('sparkle')}اكتبها لي</button></div>
-        <input class="field mt8" id="dzh" placeholder="العنوان الكبير (حتى 7 كلمات)">
+        <input class="field mt8" id="dzh" placeholder="العنوان الكبير (4 إلى 8 كلمات)">
+        <input class="field mt8" id="dzhl" placeholder="الكلمة المميّزة: كلمة واحدة من العنوان تظهر داخل مربع ملوّن">
         <textarea class="field mt8" id="dzsub" rows="2" placeholder="نص قصير داعم (اختياري)"></textarea>
         <input class="field mt8" id="dzcta" placeholder="زر الدعوة للإجراء (اختياري): اطلب الآن">
+        <details class="mt8"><summary class="xs sec" style="cursor:pointer">الكابشن والهاشتاغات (تحت المنشور، ليس على الصورة)</summary><textarea class="field mt8" id="dzcap" rows="4" placeholder="سطر جذاب، 2-3 أسطر فوائد، دعوة للإجراء"></textarea><input class="field mt8 ltr" id="dztags" placeholder="#hashtag #hashtag"></details>
         <span class="lbl">الخلفية</span>
         <textarea class="field" id="dzp" rows="3" data-enhance="image" placeholder="ماذا تُظهر الصورة؟ مثلاً: المنتج على طاولة رخامية بإضاءة صباحية"></textarea>
         <div class="flex wrap mt8" style="gap:8px">
@@ -2669,28 +2986,38 @@ function designer(opts = {}) {
         <div class="flex wrap" style="gap:12px">${b.logo?.url ? `<label class="flex sm" style="cursor:pointer"><input type="checkbox" class="check" id="dzlogo" ${d.showLogo ? 'checked' : ''}>الشعار</label>
           <div class="opts" id="dzlp">${[['left', 'يسار'], ['right', 'يمين'], ['bottom', 'أسفل']].map(([k, l]) => `<button class="opt ${d.logoPos === k ? 'on' : ''}" data-lp="${k}" style="height:30px">${l}</button>`).join('')}</div>
           <label class="flex sm" style="cursor:pointer"><input type="checkbox" class="check" id="dzplate">خلفية بيضاء للشعار</label>` : `<span class="muted xs">لا يوجد شعار. ارفعه من عقل البراند ← الهوية البصرية.</span>`}</div>
+        <input class="field mt8 ltr" id="dzfoot" placeholder="التذييل: @الحساب أو الموقع (نفس المكان في كل منشور)" value="${esc(d.footer)}">
         <span class="lbl">اللون الأساسي</span><div class="flex wrap" id="dzcolors" style="gap:8px">${[...new Set([...(b.visual?.colors || []), '#000000', '#FFFFFF'])].slice(0, 8).map((c) => `<button class="swatch-btn ${c === d.color ? 'on' : ''}" data-c="${c}" style="background:${c}" aria-label="${c}"></button>`).join('')}</div>
+        <span class="lbl">لون مربع التمييز</span><div class="flex wrap" id="dzacc" style="gap:8px">${[...new Set([...(b.visual?.colors || []), '#E3262F', '#2F5BFF', '#111111', '#FFFFFF'])].slice(0, 8).map((c) => `<button class="swatch-btn ${c === d.accent ? 'on' : ''}" data-ac="${c}" style="background:${c}" aria-label="${c}"></button>`).join('')}</div>
         <span class="lbl">حجم النص</span><div class="opts" id="dzsz">${[['s', 'صغير'], ['m', 'متوسط'], ['l', 'كبير']].map(([k, l]) => `<button class="opt ${d.size === k ? 'on' : ''}" data-sz="${k}">${l}</button>`).join('')}</div>
+        <div class="inset sm mt12" id="dzqa"></div>
         <p class="xs muted mt12">الخط: ${esc(d.fontHead)}${d.fontBody !== d.fontHead ? ` + ${esc(d.fontBody)}` : ''} · تغيّره من عقل البراند ← الخطوط.</p>
       </div></div>
-    <div class="foot"><button class="btn ghost" data-x>إلغاء</button><button class="btn grey" id="dzdl">${ic('download')}تحميل PNG</button><button class="btn primary" id="dzsave" data-busy="يحفظ…">${ic('check')}حفظ التصميم</button></div>`, (m) => {
+    <div class="foot"><button class="btn ghost" data-x>إلغاء</button><button class="btn grey" id="dzdl">${ic('download')}تحميل PNG</button><button class="btn primary" id="dzsave" data-busy="يحفظ…">${ic('check')}${esc(opts.applyLabel || 'حفظ التصميم')}</button></div>`, (m) => {
     m.classList.add('wide');
     const cv = $('#dzc', m);
     const sl = () => d.slides[d.cur];
-    const sync = () => { $('#dzh', m).value = sl().headline; $('#dzsub', m).value = sl().sub; $('#dzcta', m).value = sl().cta; $('#dzp', m).value = sl().prompt; $('#dzn', m).textContent = d.slides.length > 1 ? `· الشريحة ${d.cur + 1}` : ''; };
+    const sync = () => { $('#dzh', m).value = sl().headline; $('#dzhl', m).value = sl().highlight || ''; $('#dzcap', m).value = sl().caption || ''; $('#dztags', m).value = (sl().hashtags || []).map((h) => '#' + h).join(' '); $('#dzsub', m).value = sl().sub; $('#dzcta', m).value = sl().cta; $('#dzp', m).value = sl().prompt; $('#dzn', m).textContent = d.slides.length > 1 ? `· الشريحة ${d.cur + 1}` : ''; };
     let tick = 0;
     const draw = async () => {
       const my = ++tick;
       const c = document.createElement('canvas');
-      await renderSlide(c, d, sl(), d.cur, d.slides.length);
+      const qa = await renderSlide(c, d, sl(), d.cur, d.slides.length);
       if (my !== tick) return;
+      const ql = qaList(qa, sl());
+      $('#dzqa', m).innerHTML = `<b class="xs">فحص الجودة ${ql.every((x) => x[0]) ? chip('ممتاز', 'em', false) : chip(`${ql.filter((x) => !x[0]).length} ملاحظة`, 'am', false)}</b>${ql.map(([ok2, tx]) => `<div class="xs mt8" style="color:${ok2 ? 'var(--text-2)' : '#D97706'}">${ok2 ? '✓' : '⚠'} ${esc(tx)}</div>`).join('')}`;
       cv.width = c.width; cv.height = c.height; cv.getContext('2d').drawImage(c, 0, 0);
       const st = $('#dzs', m);
       if (st) st.innerHTML = d.slides.map((x, i) => `<button class="dz-th ${i === d.cur ? 'on' : ''}" data-i="${i}" title="${esc(x.headline)}">${x.bg ? `<img src="${esc(sameOrigin(x.bg))}" alt="">` : ''}<b>${i + 1}</b></button>`).join(''), $$('[data-i]', st).forEach((x) => (x.onclick = () => { d.cur = Number(x.dataset.i); sync(); draw(); }));
     };
     const busyOn = (t2) => { $('#dzb', m).hidden = !t2; if (t2) $('#dzbt', m).textContent = t2; };
     $('[data-x]', m).onclick = closeModal;
-    $$('[data-t]', m).forEach((x) => (x.onclick = () => { d.template = x.dataset.t; $$('[data-t]', m).forEach((y) => y.classList.toggle('on', y === x)); draw(); }));
+    let to;
+    $$('[data-t]', m).forEach((x) => (x.onclick = () => { d.template = x.dataset.t; $('#dzth', m).textContent = ARCH_L[d.template]?.[1] || ''; $$('[data-t]', m).forEach((y) => y.classList.toggle('on', y === x)); draw(); }));
+    $$('[data-ac]', m).forEach((x) => (x.onclick = () => { d.accent = x.dataset.ac; $$('[data-ac]', m).forEach((y) => y.classList.toggle('on', y === x)); draw(); }));
+    $('#dzfoot', m).oninput = (e) => { d.footer = e.target.value.slice(0, 60); clearTimeout(to); to = setTimeout(draw, 150); };
+    $('#dzcap', m).oninput = (e) => { sl().caption = e.target.value; };
+    $('#dztags', m).oninput = (e) => { sl().hashtags = e.target.value.split(/[\s,]+/).map((h) => h.replace(/^#/, '')).filter(Boolean).slice(0, 10); };
     $$('[data-a]', m).forEach((x) => (x.onclick = () => { d.aspect = x.dataset.a; $$('[data-a]', m).forEach((y) => y.classList.toggle('on', y === x)); draw(); }));
     $$('[data-lp]', m).forEach((x) => (x.onclick = () => { d.logoPos = x.dataset.lp; $$('[data-lp]', m).forEach((y) => y.classList.toggle('on', y === x)); draw(); }));
     $$('[data-sz]', m).forEach((x) => (x.onclick = () => { d.size = x.dataset.sz; $$('[data-sz]', m).forEach((y) => y.classList.toggle('on', y === x)); draw(); }));
@@ -2698,8 +3025,7 @@ function designer(opts = {}) {
     $('#dzlogo', m) && ($('#dzlogo', m).onchange = (e) => { d.showLogo = e.target.checked; draw(); });
     $('#dzplate', m) && ($('#dzplate', m).onchange = (e) => { d.logoPlate = e.target.checked; draw(); });
     $('#dzcol', m).onchange = (e) => { d.useColors = e.target.checked; };
-    let to;
-    [['#dzh', 'headline'], ['#dzsub', 'sub'], ['#dzcta', 'cta'], ['#dzp', 'prompt']].forEach(([sel, k]) => ($(sel, m).oninput = (e) => { sl()[k] = e.target.value; if (k !== 'prompt') { clearTimeout(to); to = setTimeout(draw, 120); } }));
+    [['#dzh', 'headline'], ['#dzhl', 'highlight'], ['#dzsub', 'sub'], ['#dzcta', 'cta'], ['#dzp', 'prompt']].forEach(([sel, k]) => ($(sel, m).oninput = (e) => { sl()[k] = e.target.value; if (k !== 'prompt') { clearTimeout(to); to = setTimeout(draw, 120); } }));
     $('#dzprod', m) && ($('#dzprod', m).onclick = (e) => openMenu(e.currentTarget, [{ label: 'بدون منتج', selected: !d.productId, onClick: () => { d.productId = ''; $('#dzprod .lab', m).textContent = 'بدون منتج'; } }, ...prods.map((p) => ({ label: p.name, desc: p.photo ? 'صورة المنتج تُستعمل كمرجع' : 'ينقصه صورة', selected: d.productId === p.id, onClick: () => { d.productId = p.id; $('#dzprod .lab', m).textContent = p.name; } }))]));
     const genBg = async (i) => {
       const s2 = d.slides[i];
@@ -2707,7 +3033,7 @@ function designer(opts = {}) {
       if (!prompt) throw new Error('اكتب ماذا تُظهر الصورة');
       const prod = b.products.find((p) => p.id === d.productId);
       if (prod && prod.kind !== 'service' && !prod.photo) { closeModal(); return productPhotoModal(prod, () => designer({ ...opts, slides: d.slides, aspect: d.aspect, template: d.template, productId: d.productId })); }
-      const img = await api(`/api/brands/${b.id}/images`, { method: 'POST', body: { prompt, aspect: d.aspect, productId: d.productId || undefined, useColors: d.useColors, space: SPACE[d.template], style: 'none', from: opts.from, ai: aiOf('image') } });
+      const img = await api(`/api/brands/${b.id}/images`, { method: 'POST', body: { prompt, aspect: d.aspect, productId: d.productId || undefined, useColors: d.useColors, space: SPACE[d.template], arch: ARCHS.includes(d.template) ? d.template : undefined, style: 'none', from: opts.from, ai: aiOf('image') } });
       s2.bg = img.url; S.images = null;
     };
     $('#dzgen', m).onclick = () => busy($('#dzgen', m), async () => { busyOn('يصمم الخلفية… حتى دقيقة'); try { await genBg(d.cur); await draw(); } catch (err) { toast(err.message, true); } busyOn(''); });
@@ -2724,13 +3050,14 @@ function designer(opts = {}) {
     };
     $('#dzcopy', m).onclick = () => busy($('#dzcopy', m), async () => {
       try {
-        const r = await api(`/api/brands/${b.id}/design/copy`, { method: 'POST', body: { idea: d.slides.map((x) => x.prompt || x.headline).filter(Boolean).join(' / ') || opts.idea || '', productId: d.productId, slides: d.slides.length, ai: aiOf('text') } });
-        r.slides.forEach((x, i) => { if (d.slides[i]) Object.assign(d.slides[i], { headline: x.headline, sub: x.sub, cta: i === d.slides.length - 1 || d.slides.length === 1 ? x.cta : d.slides[i].cta, prompt: d.slides[i].prompt || x.prompt }); });
+        const r = await api(`/api/brands/${b.id}/design/copy`, { method: 'POST', body: { idea: d.slides.map((x) => x.prompt || x.headline).filter(Boolean).join(' / ') || opts.idea || '', productId: d.productId, slides: d.slides.length, style: ARCHS.includes(d.template) ? d.template : undefined, ai: aiOf('text') } });
+        r.slides.forEach((x, i) => { if (d.slides[i]) Object.assign(d.slides[i], { headline: x.headline, highlight: x.highlight || '', caption: x.caption || d.slides[i].caption, hashtags: x.hashtags?.length ? x.hashtags : d.slides[i].hashtags, sub: x.sub, cta: i === d.slides.length - 1 || d.slides.length === 1 ? x.cta : d.slides[i].cta, prompt: d.slides[i].prompt || x.prompt }); });
         sync(); draw();
       } catch (err) { toast(err.message, true); }
     });
     $('#dzdl', m).onclick = async () => { const c = document.createElement('canvas'); await renderSlide(c, d, sl(), d.cur, d.slides.length); const a = document.createElement('a'); a.href = canvasData(c); a.download = `${b.name}-design-${d.cur + 1}.png`; a.click(); };
     $('#dzsave', m).onclick = () => busy($('#dzsave', m), async () => {
+      if (opts.onApply) { closeModal(); return opts.onApply(d); }
       try {
         if (d.slides.some((x) => !x.bg) && !(await confirmBox('بعض الشرائح بدون خلفية', 'سيُحفظ التصميم بخلفية رمادية في هذه الشرائح. تكمل؟', 'حفظ'))) return;
         const saved = [];
