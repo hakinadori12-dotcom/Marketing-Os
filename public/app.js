@@ -1873,7 +1873,7 @@ ${(p.hashtags || []).map((h) => '#' + h).join(' ')}`).then(() => toast('نُسخ
       try {
         const usesProduct = prod && (['product', 'texture'].includes(p.type) || p.hero);
         if (d.mode === 'full') {
-          const img = await fullPostReq(b, d, p, usesProduct ? prod : null, { campaign: c.id });
+          const img = await fullPostAuto(b, d, p, usesProduct ? prod : null, { campaign: c.id });
           Object.assign(p, { bg: img.url, full: true, textCheck: img.textCheck || null, fullSig: fullSig(p), layout: img.layout || p.layout, pz: null, composite: false });
           made++; await saveCamp(c);
           const cv = document.querySelector(`[data-cv="${i}"]`); if (cv && S.camp === c.id) { await renderTile(c, p, i, cv); cv.closest('.ctile')?.querySelector('.cw')?.remove(); }
@@ -2928,14 +2928,25 @@ async function cutoutUrl(prod) {
   const url = cut?.ok ? await uploadData(canvasData(cut, 'image/png')).catch(() => '') : '';
   CUTURL.set(prod.photo, url); return url;
 }
-async function fullPostReq(b, d, s2, prod, from) {
+async function fullPostReq(b, d, s2, prod, from, fixFrom) {
   const cut = prod?.photo ? await productCut(prod.photo) : null;
   return api(`/api/brands/${b.id}/images/full`, { method: 'POST', body: {
     slide: { headline: s2.headline, highlight: s2.highlight, sub: s2.sub, cta: s2.cta, prompt: s2.prompt }, prompt: s2.prompt,
     productId: prod?.id || undefined, cutoutUrl: prod ? await cutoutUrl(prod) : '', aspect: d.aspect,
     layout: LAYOUT_PREF[d.template] ? pickLayout(d, s2, cut) : undefined, arch: ARCHS.includes(d.template) ? d.template : undefined,
-    footer: d.footer, accent: d.accent, ctaColor: d.color, useLogo: d.showLogo !== false, from, ai: aiOf('image'),
+    footer: d.footer, accent: d.accent, ctaColor: d.color, useLogo: d.showLogo !== false, from, fixFrom, ai: aiOf('image'),
   } });
+}
+// full post + automatic text correction: when the check finds wrong words, one edit pass fixes only the text
+async function fullPostAuto(b, d, s2, prod, from, onStep) {
+  let img = await fullPostReq(b, d, s2, prod, from);
+  if (img.textCheck && !img.textCheck.ok) {
+    onStep?.('يصحح النص العربي…');
+    const fixed = await fullPostReq(b, d, s2, prod, from, img.url).catch(() => null);
+    const bad = (x) => (x?.textCheck ? x.textCheck.missing.length + (x.textCheck.onProduct ? 1 : 0) : 9);
+    if (fixed && bad(fixed) <= bad(img)) img = fixed;
+  }
+  return img;
 }
 const compositeOn = (d, sl) => (sl?.composite ?? d.composite) !== false && Boolean(LAYOUT_PREF[d.template]);
 async function renderSlide(canvas, d, sl, i, n) {
@@ -3261,7 +3272,9 @@ function designer(opts = {}) {
     <div class="dz mt12"><div class="dz-prev"><div class="dz-stage"><canvas id="dzc"></canvas><div class="dz-busy" id="dzb" hidden><span class="spin"></span><span id="dzbt">يصمم الخلفية…</span></div></div>
       ${d.slides.length > 1 ? `<div class="dz-strip" id="dzs"></div>` : ''}</div>
       <div class="dz-ctl">
-        <span class="lbl" style="margin-top:0">النمط والقالب</span><div class="opts" id="dzt">${DTPL.map(([k, l]) => `<button class="opt ${d.template === k ? 'on' : ''}" data-t="${k}">${ARCHS.includes(k) ? '✦ ' : ''}${l}</button>`).join('')}</div>
+        <div class="inset" style="padding:12px"><span class="lbl" style="margin-top:0">طريقة التصميم</span><div class="opts" id="dzmodeTop">${[['full', '✦ صورة كاملة بالذكاء الاصطناعي'], ['overlay', 'خلفية + نص المنصة']].map(([k, l]) => `<button class="opt ${d.mode === k ? 'on' : ''}" data-mode="${k}">${l}</button>`).join('')}</div>
+          <button class="btn primary mt12" id="dzgenTop" data-busy="يصمم…" style="width:100%">${ic('sparkle')}${d.mode === 'full' ? 'صمّم المنشور كاملاً' : 'صمّم الخلفية'}</button></div>
+        <span class="lbl">النمط والقالب</span><div class="opts" id="dzt">${DTPL.map(([k, l]) => `<button class="opt ${d.template === k ? 'on' : ''}" data-t="${k}">${ARCHS.includes(k) ? '✦ ' : ''}${l}</button>`).join('')}</div>
         <p class="hint mt8" id="dzth">${ARCH_L[d.template] ? esc(ARCH_L[d.template][1]) : ''}</p>
         <span class="lbl">المقاس</span><div class="opts" id="dza">${[['1:1', 'مربع'], ['4:5', 'عمودي'], ['9:16', 'ستوري'], ['16:9', 'عرضي']].map(([k, l]) => `<button class="opt ${d.aspect === k ? 'on' : ''}" data-a="${k}">${l}</button>`).join('')}</div>
         <span class="lbl">التخطيط (مكان النص)</span><div class="opts" id="dzpos">${Object.entries(LAYOUT_L).map(([k, l]) => `<button class="opt ${(d.layout || 'auto') === k ? 'on' : ''}" data-pos="${k}">${l}</button>`).join('')}</div>
@@ -3304,12 +3317,27 @@ function designer(opts = {}) {
     const draw = async () => {
       const my = ++tick;
       const c = document.createElement('canvas'); c.dataset.preview = '1';
+      if (d.mode === 'full' && !sl().full) {
+        const [W2, H2] = DSIZE[d.aspect] || DSIZE['1:1']; c.width = W2; c.height = H2; const x = c.getContext('2d');
+        const g = x.createLinearGradient(0, 0, W2, H2); g.addColorStop(0, '#16161d'); g.addColorStop(1, '#0b0b10'); x.fillStyle = g; x.fillRect(0, 0, W2, H2);
+        x.direction = 'rtl'; x.textAlign = 'center'; x.fillStyle = '#FFFFFF'; x.font = `700 ${Math.round(W2 * 0.05)}px "Thmanyah Sans", sans-serif`;
+        x.fillText('المنشور الكامل لم يُصمَّم بعد', W2 / 2, H2 * 0.45);
+        x.fillStyle = 'rgba(255,255,255,.65)'; x.font = `400 ${Math.round(W2 * 0.032)}px "Thmanyah Sans", sans-serif`;
+        x.fillText('اضغط «صمّم المنشور كاملاً»: المشهد + منتجك + النص + الشعار', W2 / 2, H2 * 0.53);
+        x.fillText('في صورة واحدة حسب دليل التصميم', W2 / 2, H2 * 0.58);
+        if (my !== tick) return;
+        const cv0 = $('#dzc', m); cv0.width = c.width; cv0.height = c.height; cv0.getContext('2d').drawImage(c, 0, 0);
+        $('#dzqa', m).innerHTML = '<b class="xs">فحص الجودة</b><div class="xs mt8 sec">يظهر بعد التصميم: نقرأ النص المكتوب في الصورة ونتحقق منه.</div>';
+        return;
+      }
       const qa = await renderSlide(c, d, sl(), d.cur, d.slides.length);
       if (my !== tick) return;
       const ql = qaList(qa, sl());
+      setTimeout(() => { const fx = $('#dzfix', m); if (fx) fx.onclick = () => busy(fx, async () => { busyOn('يصحح النص العربي…'); try { const s2 = sl(); const prod = b.products.find((p) => p.id === d.productId); const img = await fullPostReq(b, d, s2, prod, opts.from, s2.bg); Object.assign(s2, { bg: img.url, textCheck: img.textCheck || null }); S.images = null; await draw(); if (img.textCheck && !img.textCheck.ok) toast('ما زال في النص خطأ. جرّب مرة أخرى أو استعمل «خلفية + نص المنصة».', true); } catch (err) { toast(err.message, true); } busyOn(''); }); }, 0);
       if (qa.composite && sl().bgLayout && sl().bgLayout !== qa.layout) ql.push([false, `الخلفية صُممت لتخطيط ${sl().bgLayout}: أعد «صمّم الخلفية» حتى تتطابق المنصة مع مكان المنتج`]);
       if (qa.composite) ql.unshift([true, 'صورة المنتج الحقيقية في مكانها المحدد']);
-      $('#dzqa', m).innerHTML = `<b class="xs">فحص الجودة ${ql.every((x) => x[0]) ? chip('ممتاز', 'em', false) : chip(`${ql.filter((x) => !x[0]).length} ملاحظة`, 'am', false)}</b>${ql.map(([ok2, tx]) => `<div class="xs mt8" style="color:${ok2 ? 'var(--text-2)' : '#D97706'}">${ok2 ? '✓' : '⚠'} ${esc(tx)}</div>`).join('')}`;
+      const needFix = qa.full && sl().textCheck && !sl().textCheck.ok;
+      $('#dzqa', m).innerHTML = `${needFix ? `<button class="btn grey sm" id="dzfix" style="float:left">${ic('edit')}صحّح النص</button>` : ''}<b class="xs">فحص الجودة ${ql.every((x) => x[0]) ? chip('ممتاز', 'em', false) : chip(`${ql.filter((x) => !x[0]).length} ملاحظة`, 'am', false)}</b>${ql.map(([ok2, tx]) => `<div class="xs mt8" style="color:${ok2 ? 'var(--text-2)' : '#D97706'}">${ok2 ? '✓' : '⚠'} ${esc(tx)}</div>`).join('')}`;
       cv.width = c.width; cv.height = c.height; cv.getContext('2d').drawImage(c, 0, 0);
       const st = $('#dzs', m);
       if (st) st.innerHTML = d.slides.map((x, i) => `<button class="dz-th ${i === d.cur ? 'on' : ''}" data-i="${i}" title="${esc(x.headline)}">${x.bg ? `<img src="${esc(sameOrigin(x.bg))}" alt="">` : ''}<b>${i + 1}</b></button>`).join(''), $$('[data-i]', st).forEach((x) => (x.onclick = () => { d.cur = Number(x.dataset.i); sync(); draw(); }));
@@ -3321,7 +3349,8 @@ function designer(opts = {}) {
     $('#dzzone', m).onchange = (e) => { d.showZone = e.target.checked; draw(); };
     $$('[data-mode]', m).forEach((x) => (x.onclick = () => {
       d.mode = x.dataset.mode; $$('[data-mode]', m).forEach((y) => y.classList.toggle('on', y === x));
-      $('#dzgen', m).lastChild.textContent = d.mode === 'full' ? 'صمّم المنشور كاملاً' : 'صمّم الخلفية';
+      [$('#dzgen', m), $('#dzgenTop', m)].forEach((btn) => { btn.lastChild.textContent = d.mode === 'full' ? 'صمّم المنشور كاملاً' : 'صمّم الخلفية'; });
+      $$('[data-mode]', m).forEach((y) => y.classList.toggle('on', y.dataset.mode === d.mode));
       $('#dzmodeh', m).textContent = d.mode === 'full' ? 'الذكاء الاصطناعي يصمم المنشور كاملاً دفعة واحدة (المشهد + منتجك + النص + الشعار) حسب دليل التصميم والتخطيط المختار. يُفضّل Gemini (Nano Banana) أو GPT Image. ثم نتحقق من كتابة النص.' : 'الذكاء الاصطناعي يصمم الصورة، والمنصة تكتب النص بخط براندك: الحروف مضمونة 100%.';
       if (d.mode === 'overlay') d.slides.forEach((s3) => { if (s3.full) { s3.full = false; s3.bg = ''; } });
       $('#dzov', m) && ($('#dzov', m).hidden = d.mode === 'full');
@@ -3350,7 +3379,7 @@ function designer(opts = {}) {
       if (prod && prod.kind !== 'service' && !prod.photo) { closeModal(); return productPhotoModal(prod, () => designer({ ...opts, slides: d.slides, aspect: d.aspect, template: d.template, productId: d.productId })); }
       if (d.mode === 'full') {
         if (!s2.headline.trim()) throw new Error('اكتب العنوان أولاً أو اضغط «اكتبها لي»');
-        const img = await fullPostReq(b, d, s2, prod, opts.from);
+        const img = await fullPostAuto(b, d, s2, prod, opts.from, (t) => busyOn(t));
         Object.assign(s2, { bg: img.url, full: true, textCheck: img.textCheck || null, fullSig: fullSig(s2), layout: s2.layout && s2.layout !== 'auto' ? s2.layout : img.layout });
         S.images = null;
         if (img.textCheck && !img.textCheck.ok) toast('الذكاء الاصطناعي لم يكتب النص بشكل صحيح. أعد التوليد، أو استعمل «خلفية + نص المنصة».', true);
@@ -3364,7 +3393,8 @@ function designer(opts = {}) {
       s2.bg = img.url; s2.pz = img.subject || null; s2.bgLayout = stage ? lay : ''; if (stage && lay) s2.layout = s2.layout && s2.layout !== 'auto' ? s2.layout : lay; S.images = null;
       if (prod?.photo && compositeOn(d, s2) && !stage) toast('صورة المنتج خلفيتها غير موحّدة، فوضعنا المنتج داخل المشهد. ارفع صورة المنتج بخلفية بيضاء أو شفافة للحصول على أفضل نتيجة.');
     };
-    $('#dzgen', m).onclick = () => busy($('#dzgen', m), async () => { busyOn('يصمم الخلفية… حتى دقيقة'); try { await genBg(d.cur); await draw(); } catch (err) { toast(err.message, true); } busyOn(''); });
+    $('#dzgen', m).onclick = () => busy($('#dzgen', m), async () => { busyOn(d.mode === 'full' ? 'يصمم المنشور كاملاً… حتى دقيقتين' : 'يصمم الخلفية… حتى دقيقة'); try { await genBg(d.cur); await draw(); } catch (err) { toast(err.message, true); } busyOn(''); });
+    $('#dzgenTop', m).onclick = () => busy($('#dzgenTop', m), async () => { busyOn(d.mode === 'full' ? 'يصمم المنشور كاملاً… حتى دقيقتين' : 'يصمم الخلفية… حتى دقيقة'); try { await genBg(d.cur); await draw(); } catch (err) { toast(err.message, true); } busyOn(''); });
     $('#dzall', m) && ($('#dzall', m).onclick = () => busy($('#dzall', m), async () => {
       for (let i = 0; i < d.slides.length; i++) { if (d.slides[i].bg) continue; d.cur = i; sync(); busyOn(`يصمم الشريحة ${i + 1} من ${d.slides.length}…`); try { await genBg(i); } catch (err) { toast(`الشريحة ${i + 1}: ${err.message}`, true); } await draw(); }
       busyOn('');
