@@ -688,7 +688,7 @@ function brainVisual() {
   return `<div class="grid c12">${needs ? `<div class="card s12 propose"><div class="flex wrap" style="gap:14px"><span class="ic">${ic('sparkle')}</span><div class="grow"><b>ما عندكش ${miss.join(' ولا ')}؟</b><p class="muted sm">الذكاء الاصطناعي يقترح عليك ${miss.join(' و')} تناسب براندك وجمهورك وتميّزك عن المنافسين. أنت من يقرر.</p></div>
     ${colors.length < 2 ? `<button class="btn ghost" id="idpal" data-busy="يقترح…">${ic('sparkle')}اقترح ألواناً</button>` : ''}${!b.visual?.fonts?.heading ? `<button class="btn ghost" id="idfont2" data-busy="يقترح…">${ic('sparkle')}اقترح خطوطاً</button>` : ''}${!b.logo ? `<button class="btn primary" id="idlogo">${ic('studio')}صمّم شعاراً</button>` : ''}</div></div>` : ''}${guideCard(b)}
     <div class="card s6"><div class="card-h"><h3>الشعار</h3>${b.logo ? `<div class="end">${chip('مرفوع', 'em')}</div>` : ''}</div>
-      ${b.logo?.url ? `<div class="inset" style="display:grid;place-items:center;height:180px"><img src="${esc(b.logo.url)}" alt="logo" style="max-width:70%;max-height:150px;object-fit:contain"></div>` : ''}
+      ${b.logo?.url ? `<div class="inset lp-check" style="display:grid;place-items:center;height:180px"><img src="${esc(b.logo.url)}" alt="logo" style="max-width:70%;max-height:150px;object-fit:contain"></div><div class="flex mt8" style="justify-content:flex-end"><button class="btn grey sm" id="lpbg">${ic('sparkle')}إزالة خلفية الشعار</button></div>` : ''}
       <label class="drop mt12" id="drop" style="display:block">${ic('upload')}<div class="mt8"><b>${b.logo ? 'تغيير الشعار' : 'ارفع الشعار'}</b></div><div class="xs">PNG بخلفية شفافة أفضل · حتى 3MB</div><input type="file" id="logoIn" accept="image/png,image/jpeg,image/webp,image/svg+xml" hidden></label>
     </div>
     <div class="stack s6">
@@ -794,15 +794,7 @@ function bindBrain(v) {
   // visual
   const input = $('#logoIn', v);
   if (input) {
-    const upload = (file) => {
-      if (!file) return;
-      if (file.size > 3 * 1024 * 1024) return toast('حجم الشعار أكبر من 3MB', true);
-      const r = new FileReader();
-      r.onload = async () => {
-        try { toast('جارٍ رفع الشعار…'); S.brand = await api(`/api/brands/${b.id}/logo`, { method: 'POST', body: { dataUrl: r.result } }); renderShell(); go('brain', { replace: true }); toast('تم رفع الشعار'); } catch (e) { toast(e.message, true); }
-      };
-      r.readAsDataURL(file);
-    };
+    const upload = (file) => { if (file) logoPrep(file); };
     input.onchange = () => upload(input.files[0]);
     const d = $('#drop', v);
     d.ondragover = (e) => { e.preventDefault(); d.classList.add('over'); };
@@ -822,6 +814,7 @@ function bindBrain(v) {
   // identity proposals (palette / logo)
   $('#idpal', v) && ($('#idpal').onclick = (e) => busy(e.currentTarget, () => paletteModal()));
   $('#idlogo', v) && ($('#idlogo').onclick = () => logoModal());
+  $('#lpbg', v) && ($('#lpbg', v).onclick = () => logoPrep(b.logo.url));
   $('#idfont', v) && ($('#idfont').onclick = (e) => busy(e.currentTarget, () => fontModal()));
   $('#idfont2', v) && ($('#idfont2').onclick = (e) => busy(e.currentTarget, () => fontModal()));
   // visual identity guide
@@ -1864,7 +1857,7 @@ function drawCampaign(c) {
   $$('[data-ccopy]', v).forEach((x) => (x.onclick = () => { const p = c.posts[Number(x.dataset.ccopy)]; navigator.clipboard?.writeText(`${p.caption}
 
 ${(p.hashtags || []).map((h) => '#' + h).join(' ')}`).then(() => toast('نُسخ الكابشن')); }));
-  const keepSeries = (dd) => ({ template: dd.template, aspect: dd.aspect, color: dd.color, accent: dd.accent, footer: dd.footer, showLogo: dd.showLogo, logoPos: dd.logoPos, logoPlate: dd.logoPlate, size: dd.size, productId: c.productId || '' });
+  const keepSeries = (dd) => ({ textPos: dd.textPos || 'auto', template: dd.template, aspect: dd.aspect, color: dd.color, accent: dd.accent, footer: dd.footer, showLogo: dd.showLogo, logoPos: dd.logoPos, logoPlate: dd.logoPlate, size: dd.size, productId: c.productId || '' });
   $$('[data-pi]', v).forEach((x) => (x.onclick = () => {
     const i = Number(x.dataset.pi); const p = c.posts[i];
     designer({ slides: [p], aspect: d.aspect, template: d.template, productId: ['product', 'texture'].includes(p.type) || p.hero ? c.productId || '' : '', design: { ...d, noCounter: true }, applyLabel: 'تطبيق على الحملة', idea: p.visual,
@@ -2454,6 +2447,97 @@ async function paletteModal() {
     $$('[data-pal]', m).forEach((x) => (x.onclick = () => busy(x, async () => { try { await patchBrand({ visual: { colors: list[Number(x.dataset.pal)].colors.map((c) => c.hex).slice(0, 8) } }); closeModal(); toast('تم تطبيق الألوان'); } catch (e) { toast(e.message, true); } })));
   });
 }
+// ---------- logo background removal (in the browser, optional) ----------
+// Removes a plain background (white, black or any solid colour) from the logo edges, softens the edge,
+// optionally clears the same colour inside letters, and trims the empty margins.
+function logoCutout(im, { tol = 40, holes = false, remove = true } = {}) {
+  const r = Math.min(1, 1200 / Math.max(im.width, im.height));
+  const w = Math.max(1, Math.round(im.width * r)); const h = Math.max(1, Math.round(im.height * r));
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  const x = c.getContext('2d', { willReadFrequently: true }); x.drawImage(im, 0, 0, w, h);
+  const id = x.getImageData(0, 0, w, h); const px = id.data;
+  if (remove) {
+    const border = [];
+    for (let i = 0; i < w; i++) border.push(i, (h - 1) * w + i);
+    for (let j = 0; j < h; j++) border.push(j * w, j * w + w - 1);
+    const opaque = border.filter((k) => px[k * 4 + 3] > 200);
+    if (opaque.length > border.length * 0.3) {
+      const med = (ch) => { const v = opaque.map((k) => px[k * 4 + ch]).sort((a, b) => a - b); return v[v.length >> 1]; };
+      const bg = [med(0), med(1), med(2)];
+      const dist = (k) => { const o = k * 4; return Math.hypot(px[o] - bg[0], px[o + 1] - bg[1], px[o + 2] - bg[2]); };
+      const mask = new Uint8Array(w * h); const q = [];
+      for (const k of opaque) if (!mask[k] && dist(k) < tol) { mask[k] = 1; q.push(k); }
+      while (q.length) {
+        const k = q.pop(); const xx = k % w; const yy = (k / w) | 0;
+        for (const nb of [xx > 0 ? k - 1 : -1, xx < w - 1 ? k + 1 : -1, yy > 0 ? k - w : -1, yy < h - 1 ? k + w : -1]) if (nb >= 0 && !mask[nb] && dist(nb) < tol) { mask[nb] = 1; q.push(nb); }
+      }
+      if (holes) for (let k = 0; k < w * h; k++) if (!mask[k] && dist(k) < tol * 0.7) mask[k] = 1;
+      for (let k = 0; k < w * h; k++) {
+        const o = k * 4;
+        if (mask[k]) { px[o + 3] = 0; continue; }
+        const xx = k % w; const yy = (k / w) | 0;
+        const edge = (xx > 0 && mask[k - 1]) || (xx < w - 1 && mask[k + 1]) || (yy > 0 && mask[k - w]) || (yy < h - 1 && mask[k + w]);
+        const dd = dist(k);
+        if (edge && dd < tol * 2) {
+          const a = Math.max(0.05, Math.min(1, (dd - tol) / tol + 0.35));
+          for (let ch = 0; ch < 3; ch++) px[o + ch] = Math.max(0, Math.min(255, Math.round((px[o + ch] - bg[ch] * (1 - a)) / a)));
+          px[o + 3] = Math.round(px[o + 3] * a);
+        }
+      }
+      x.putImageData(id, 0, 0);
+    }
+  }
+  // trim empty margins
+  let x0 = w; let y0 = h; let x1 = -1; let y1 = -1;
+  for (let yy = 0; yy < h; yy++) for (let xx = 0; xx < w; xx++) if (px[(yy * w + xx) * 4 + 3] > 12) { if (xx < x0) x0 = xx; if (xx > x1) x1 = xx; if (yy < y0) y0 = yy; if (yy > y1) y1 = yy; }
+  if (x1 < 0) return c;
+  const pad = Math.round(Math.max(x1 - x0, y1 - y0) * 0.04);
+  x0 = Math.max(0, x0 - pad); y0 = Math.max(0, y0 - pad); x1 = Math.min(w - 1, x1 + pad); y1 = Math.min(h - 1, y1 + pad);
+  const o = document.createElement('canvas'); o.width = x1 - x0 + 1; o.height = y1 - y0 + 1;
+  o.getContext('2d').drawImage(c, x0, y0, o.width, o.height, 0, 0, o.width, o.height);
+  return o;
+}
+async function logoPrep(src) {
+  const b = S.brand;
+  let dataUrl0 = '';
+  if (src instanceof File) {
+    if (src.size > 3 * 1024 * 1024) return toast('حجم الشعار أكبر من 3MB', true);
+    dataUrl0 = await new Promise((ok) => { const r = new FileReader(); r.onload = () => ok(r.result); r.readAsDataURL(src); });
+    if (src.type === 'image/svg+xml') { try { S.brand = await api(`/api/brands/${b.id}/logo`, { method: 'POST', body: { dataUrl: dataUrl0 } }); renderShell(); go('brain', { replace: true }); toast('تم رفع الشعار'); } catch (e) { toast(e.message, true); } return; }
+  }
+  const im = await (dataUrl0 ? new Promise((ok) => { const i2 = new Image(); i2.onload = () => ok(i2); i2.onerror = () => ok(null); i2.src = dataUrl0; }) : loadImg(src));
+  if (!im) return toast('تعذّرت قراءة صورة الشعار', true);
+  // already transparent?
+  const probe = document.createElement('canvas'); probe.width = 40; probe.height = 40; const pc = probe.getContext('2d'); pc.drawImage(im, 0, 0, 40, 40);
+  const pd = pc.getImageData(0, 0, 40, 40).data; let clear = 0; for (let k = 0; k < 40; k++) for (const p2 of [k, 39 * 40 + k, k * 40, k * 40 + 39]) if (pd[p2 * 4 + 3] < 30) clear++;
+  const st = { remove: clear < 60, tol: 40, holes: false };
+  modal(`<h2>الشعار</h2><p class="muted sm mt8">نزيل خلفية الشعار حتى يظهر نظيفاً فوق الصور والتصاميم. الإزالة اختيارية، وتعمل أفضل مع الخلفيات بلون واحد.</p>
+    <div class="grid c3 mt12" style="gap:10px">
+      <div><span class="xs muted">الأصلي</span><div class="lp-tile" style="background:#fff"><img id="lp0" alt=""></div></div>
+      <div><span class="xs muted">على خلفية فاتحة</span><div class="lp-tile lp-check"><canvas id="lp1"></canvas></div></div>
+      <div><span class="xs muted">على خلفية داكنة</span><div class="lp-tile" style="background:#14141a"><canvas id="lp2"></canvas></div></div></div>
+    <label class="flex sm mt16" style="cursor:pointer"><input type="checkbox" class="check" id="lprm" ${st.remove ? 'checked' : ''}>إزالة الخلفية ${clear >= 60 ? chip('الشعار شفاف أصلاً', 'em', false) : ''}</label>
+    <div id="lpopt" ${st.remove ? '' : 'hidden'}><div class="flex mt12"><span class="sm sec grow">دقة الإزالة</span><b class="xs tnum" id="lptv">40</b></div><input type="range" id="lptol" min="10" max="110" step="5" value="40">
+      <label class="flex sm mt8" style="cursor:pointer"><input type="checkbox" class="check" id="lpho">أزل نفس اللون داخل الحروف أيضاً (مثل داخل حرف O)</label></div>
+    <div class="foot"><button class="btn ghost" data-x>إلغاء</button><button class="btn primary" id="lpsave" data-busy="يحفظ…">${ic('check')}حفظ الشعار</button></div>`, (m) => {
+    $('#lp0', m).src = im.src;
+    let out = null;
+    const draw = () => { out = logoCutout(im, st); [$('#lp1', m), $('#lp2', m)].forEach((cv) => { cv.width = out.width; cv.height = out.height; cv.getContext('2d').drawImage(out, 0, 0); }); };
+    $('[data-x]', m).onclick = closeModal;
+    $('#lprm', m).onchange = (e) => { st.remove = e.target.checked; $('#lpopt', m).hidden = !st.remove; draw(); };
+    $('#lptol', m).oninput = (e) => { st.tol = Number(e.target.value); $('#lptv', m).textContent = st.tol; clearTimeout(m._t); m._t = setTimeout(draw, 80); };
+    $('#lpho', m).onchange = (e) => { st.holes = e.target.checked; draw(); };
+    $('#lpsave', m).onclick = () => busy($('#lpsave', m), async () => {
+      try {
+        const url = !st.remove && dataUrl0 ? dataUrl0 : out.toDataURL('image/png');
+        if (url.length > 4.2 * 1024 * 1024) throw new Error('الشعار كبير جداً بعد المعالجة. جرّب صورة أصغر.');
+        S.brand = await api(`/api/brands/${b.id}/logo`, { method: 'POST', body: { dataUrl: url } });
+        IMGC.clear(); closeModal(); renderShell(); go('brain', { replace: true }); toast(st.remove ? 'تم حفظ الشعار بخلفية شفافة' : 'تم حفظ الشعار');
+      } catch (e) { toast(e.message, true); }
+    });
+    draw();
+  });
+}
 function logoModal() {
   const b = S.brand;
   const st = { style: 'wordmark' };
@@ -2469,7 +2553,7 @@ function logoModal() {
       try {
         const r = await api(`/api/brands/${b.id}/identity/logos`, { method: 'POST', body: { style: st.style, note: $('#lnote').value, colors: $('#lcol')?.checked ? b.visual.colors : [], ai: aiOf('image') } });
         $('#lres').innerHTML = `<div class="logo-grid">${r.logos.map((l) => `<figure><img src="${esc(l.url)}" alt=""><button class="btn primary sm" data-use="${esc(l.url)}">${ic('check')}اعتمد هذا</button></figure>`).join('')}</div>${r.errors.length ? `<p class="xs muted mt8">${r.errors.length} اقتراح لم يكتمل</p>` : ''}`;
-        $$('[data-use]', m).forEach((x) => (x.onclick = () => busy(x, async () => { try { S.brand = await api(`/api/brands/${b.id}/identity/use-logo`, { method: 'POST', body: { url: x.dataset.use } }); closeModal(); renderShell(); go('brain', { replace: true }); toast('تم اعتماد الشعار'); } catch (e) { toast(e.message, true); } })));
+        $$('[data-use]', m).forEach((x) => (x.onclick = () => busy(x, async () => { try { S.brand = await api(`/api/brands/${b.id}/identity/use-logo`, { method: 'POST', body: { url: x.dataset.use } }); closeModal(); renderShell(); go('brain', { replace: true }); toast('تم اعتماد الشعار'); setTimeout(() => S.brand?.logo?.url && logoPrep(S.brand.logo.url), 400); } catch (e) { toast(e.message, true); } })));
       } catch (e) { toast(e.message, true); }
     });
   });
@@ -2743,10 +2827,33 @@ function regionLum(ctx, x, y, w, h) {
   } catch { return 0.5; }
 }
 const shade = (hex, f) => { const h = String(hex || '#000000').replace('#', ''); return '#' + [0, 2, 4].map((i) => Math.max(0, Math.min(255, Math.round(parseInt(h.slice(i, i + 2), 16) * f))).toString(16).padStart(2, '0')).join(''); };
+// Busy-ness map of the background (edges + colour spread per row): text goes where the photo is calm,
+// so it never covers the product, a face or the main subject.
+function busyRows(src, W, H) {
+  try {
+    const sw = 64; const sh = Math.max(8, Math.round(sw * H / W));
+    const c = document.createElement('canvas'); c.width = sw; c.height = sh;
+    const x = c.getContext('2d', { willReadFrequently: true }); x.drawImage(src, 0, 0, sw, sh);
+    const px = x.getImageData(0, 0, sw, sh).data;
+    const L = (i) => 0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2];
+    const rows = new Float32Array(sh);
+    for (let y = 0; y < sh; y++) {
+      let g = 0; let s = 0; let s2 = 0;
+      for (let xx = 0; xx < sw; xx++) {
+        const i = (y * sw + xx) * 4; const l = L(i); s += l; s2 += l * l;
+        if (xx < sw - 1) g += Math.abs(l - L(i + 4));
+        if (y < sh - 1) g += Math.abs(l - L(i + sw * 4));
+      }
+      const mean = s / sw; rows[y] = g / sw + 0.6 * Math.sqrt(Math.max(0, s2 / sw - mean * mean));
+    }
+    return { rows, sh, H, band: (y0, y1) => { const a = Math.max(0, Math.floor(y0 / H * sh)); const b = Math.min(sh, Math.ceil(y1 / H * sh)); let t = 0; for (let k = a; k < b; k++) t += rows[k]; return b > a ? t / (b - a) : 0; }, median: [...rows].sort((p, q) => p - q)[Math.floor(sh / 2)] };
+  } catch { return null; }
+}
 async function renderSlide(canvas, d, sl, i, n) {
   const [W, H] = DSIZE[d.aspect] || DSIZE['1:1'];
   canvas.width = W; canvas.height = H;
-  const ctx = canvas.getContext('2d');
+  let ctx = canvas.getContext('2d', { willReadFrequently: true });
+  const main = ctx;
   const hf = d.fontHead || 'Thmanyah Sans'; const bf = d.fontBody || hf;
   try { await Promise.all([document.fonts.load(`700 40px "${hf}"`), document.fonts.load(`400 40px "${bf}"`)]); } catch { /* fallback fonts */ }
   const [bg, logo] = await Promise.all([loadImg(sl.bg), d.showLogo ? loadImg(S.brand.logo?.url) : null]);
@@ -2755,13 +2862,17 @@ async function renderSlide(canvas, d, sl, i, n) {
   const P = Math.round(W * 0.067);
   const story = d.aspect === '9:16';
   const TOP = story ? Math.round(H * 250 / 1920) : P; const BOT = story ? Math.round(H * 340 / 1920) : P;
-  const qa = { minFont: 999, contrast: [], highlight: 0, words: String(sl.headline || '').trim().split(/\s+/).filter(Boolean).length, inSafe: true };
-  const used = (px) => { qa.minFont = Math.min(qa.minFont, px * 1080 / W); };
+  const qa = { minFont: 999, contrast: [], highlight: 0, words: String(sl.headline || '').trim().split(/\s+/).filter(Boolean).length, inSafe: true, busy: null };
+  let DRY = false; let box = null;
+  const mark = (y0, y1) => { if (!box) box = [y0, y1]; else { box[0] = Math.min(box[0], y0); box[1] = Math.max(box[1], y1); } };
+  const used = (px) => { if (!DRY) qa.minFont = Math.min(qa.minFont, px * 1080 / W); };
   ctx.direction = 'rtl'; ctx.textBaseline = 'alphabetic';
   ctx.fillStyle = '#EDEDED'; ctx.fillRect(0, 0, W, H);
   const scale = { s: 0.85, m: 1, l: 1.18 }[d.size || 'm'];
   // One line, with the highlight word boxed (same treatment on every post).
   const line = (text, x, y, align, color, size, hl) => {
+    mark(y - size * 1.0, y + size * 0.3);
+    if (DRY) return;
     const rtl = hasAr(text); ctx.direction = rtl ? 'rtl' : 'ltr';
     ctx.textAlign = align; ctx.fillStyle = color; ctx.fillText(text, x, y);
     const at = hl ? text.indexOf(hl) : -1;
@@ -2780,19 +2891,28 @@ async function renderSlide(canvas, d, sl, i, n) {
     f.lines.forEach((l, k) => line(l, x, y + k * f.size * 1.22, align, color, f.size, hl && l.includes(hl) ? hl : ''));
     return y + (f.lines.length - 1) * f.size * 1.22 + f.size * 0.35;
   };
-  const para = (text, color, x, y, maxW, base, lines, align = 'right') => { if (!text) return y; ctx.direction = hasAr(text) ? 'rtl' : 'ltr'; ctx.textAlign = align; ctx.fillStyle = color; const f = fitText(ctx, text, bf, 400, maxW, Math.round(base * scale), lines); used(f.size); f.lines.forEach((l, k) => ctx.fillText(l, x, y + k * f.size * 1.4)); return y + (f.lines.length - 1) * f.size * 1.4 + f.size * 0.4; };
+  const para = (text, color, x, y, maxW, base, lines, align = 'right') => {
+    if (!text) return y;
+    ctx.direction = hasAr(text) ? 'rtl' : 'ltr'; ctx.textAlign = align; ctx.fillStyle = color;
+    const f = fitText(ctx, text, bf, 400, maxW, Math.round(base * scale), lines); used(f.size);
+    f.lines.forEach((l, k) => { mark(y + k * f.size * 1.4 - f.size, y + k * f.size * 1.4 + f.size * 0.3); if (!DRY) ctx.fillText(l, x, y + k * f.size * 1.4); });
+    return y + (f.lines.length - 1) * f.size * 1.4 + f.size * 0.4;
+  };
   const pill = (text, x, y, align = 'right', inv = false, colors) => {
     if (!text) return 0;
     const fs = Math.round(W * 0.032 * scale); used(fs);
     ctx.font = `700 ${fs}px "${hf}", "Thmanyah Sans", sans-serif`; ctx.direction = hasAr(text) ? 'rtl' : 'ltr';
     const tw = ctx.measureText(text).width; const ph = fs * 2.1; const pw = tw + ph * 1.1;
     const px = align === 'right' ? x - pw : align === 'center' ? x - pw / 2 : x;
+    mark(y, y + ph);
+    if (DRY) return ph;
     ctx.fillStyle = colors ? colors[0] : inv ? CT : C; rr(ctx, px, y, pw, ph, ph / 2); ctx.fill();
     ctx.fillStyle = colors ? colors[1] : inv ? C : CT; ctx.textAlign = 'center'; ctx.fillText(text, px + pw / 2, y + ph * 0.66);
     return ph;
   };
   // Text colour that reads best on the photo region; soft scrim when even the best is under 4.5:1.
   const readable = (x, y, w, h, prefer) => {
+    if (DRY) return { color: prefer || '#FFFFFF', cr: 21 };
     const L = regionLum(ctx, x, y, w, h);
     const cands = [prefer, '#FFFFFF', '#111111'].filter(Boolean);
     let best = cands[0]; let bc = 0;
@@ -2819,49 +2939,105 @@ async function renderSlide(canvas, d, sl, i, n) {
       ctx.fillStyle = '#1A1A1A'; ctx.textAlign = 'center'; ctx.fillText(footer, W / 2, H - BOT - ph * 0.32);
     } else { ctx.fillStyle = color; ctx.textAlign = 'left'; ctx.fillText(footer, P, H - BOT); }
   };
+  const logoTop = Boolean(logo) && (ARCHS.includes(t) ? t !== 'street' : d.logoPos !== 'bottom');
+  const resTop = TOP + (logoTop ? W * 0.17 : 0);
+  const resBot = BOT + (footer || (logo && !logoTop) ? W * 0.07 : 0);
+  // The text block of each movable template, drawn at vertical offset dy (y0 = where the template wants it by default).
   let logoAt = null;
-  if (ARCHS.includes(t)) {
-    drawCover(ctx, bg, 0, 0, W, H);
-    const ar = hasAr(sl.headline || sl.sub || 'ع');
-    const xA = ar ? W - P : P; const al = ar ? 'right' : 'left';
-    if (t === 'mono') {
-      // fixed frame: logo top-left, headline zone under it, handle footer bottom-left
-      logoAt = 'tl';
-      const y0 = TOP + W * 0.2;
-      const zone = readable(P, y0 - W * 0.1, W - P * 2, W * 0.36, '#FFFFFF');
-      qa.contrast.push(zone.cr);
+  const ar = hasAr(sl.headline || sl.sub || 'ع');
+  const xA = ar ? W - P : P; const al = ar ? 'right' : 'left';
+  const block = {
+    mono: (dy) => {
+      const y0 = resTop + W * 0.08 + dy;
+      const zone = readable(P, y0 - W * 0.1, W - P * 2, W * 0.36, '#FFFFFF'); if (!DRY) qa.contrast.push(zone.cr);
       let y = head(sl.headline, zone.color, xA, y0, W - P * 2, W * 0.088, 3, al);
       y = para(sl.sub, zone.color, xA, y + W * 0.05, W - P * 2, W * 0.034, 2, al);
-      if (sl.cta) pill(sl.cta, ar ? P : W - P, H - BOT - W * 0.075, ar ? 'left' : 'right');
-      const fz = readable(P, H - BOT - W * 0.04, W * 0.5, W * 0.05, '#FFFFFF');
-      drawFooter('text', fz.color);
-    } else if (t === 'glow') {
-      logoAt = 'tc';
-      // 1-3 soft decorative circles (never cluttered)
-      ctx.save(); [[0.12, 0.2, 0.05], [0.9, 0.34, 0.035], [0.84, 0.78, 0.028]].slice(0, 2 + (i % 2)).forEach(([cx, cy, r]) => { const g = ctx.createRadialGradient(W * cx, H * cy, 0, W * cx, H * cy, W * r * 2.2); g.addColorStop(0, 'rgba(255,255,255,.7)'); g.addColorStop(1, 'rgba(255,255,255,0)'); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(W * cx, H * cy, W * r * 2.2, 0, 7); ctx.fill(); }); ctx.restore();
-      const y0 = TOP + W * 0.26;
+      if (sl.cta) pill(sl.cta, xA, y + W * 0.035, al);
+    },
+    glow: (dy) => {
+      const y0 = resTop + W * 0.1 + dy;
       const deep = lum(C) < 0.3 ? C : shade(C, 0.55);
-      const zone = readable(P, y0 - W * 0.1, W - P * 2, W * 0.4, deep);
-      qa.contrast.push(zone.cr);
+      const zone = readable(P, y0 - W * 0.1, W - P * 2, W * 0.4, deep); if (!DRY) qa.contrast.push(zone.cr);
       let y = head(sl.headline, zone.color, W / 2, y0, W - P * 2.4, W * 0.09, 3, 'center');
       y = para(sl.sub, zone.color, W / 2, y + W * 0.05, W - P * 3, W * 0.034, 2, 'center');
       if (sl.cta) pill(sl.cta, W / 2, y + W * 0.035, 'center', false, [deep, '#FFFFFF']);
-      drawFooter('pill');
-    } else {
-      // street: one sticker-style line in a top corner, logo small bottom
-      logoAt = 'bl';
+    },
+    street: (dy) => {
       const fs = Math.round(W * 0.06 * scale);
       const f = fitText(ctx, sl.headline, hf, 700, W * 0.62, fs, 2); used(f.size);
       const lw = Math.max(...f.lines.map((l) => ctx.measureText(l).width)); const bh = f.lines.length * f.size * 1.25 + f.size * 0.6;
-      const bx = ar ? W - P - lw - f.size : P; const by = TOP;
+      const bx = ar ? W - P - lw - f.size : P; const by = TOP + dy;
       let SC = C; const ST = '#FFFFFF';
       for (let k = 0; k < 10 && contrast(lum(ST), lum(SC)) < 4.5; k++) SC = shade(SC, 0.86);
-      ctx.save(); ctx.translate(bx + (lw + f.size) / 2, by + bh / 2); ctx.rotate(ar ? 0.035 : -0.035); ctx.fillStyle = SC; rr(ctx, -(lw + f.size) / 2, -bh / 2, lw + f.size, bh, f.size * 0.25); ctx.fill(); ctx.restore();
+      mark(by, by + bh);
+      if (!DRY) { ctx.save(); ctx.translate(bx + (lw + f.size) / 2, by + bh / 2); ctx.rotate(ar ? 0.035 : -0.035); ctx.fillStyle = SC; rr(ctx, -(lw + f.size) / 2, -bh / 2, lw + f.size, bh, f.size * 0.25); ctx.fill(); ctx.restore(); qa.contrast.push(contrast(lum(ST), lum(SC))); }
       const hl = String(sl.highlight || '').trim();
       f.lines.forEach((l, k) => line(l, ar ? bx + lw + f.size / 2 : bx + f.size / 2, by + f.size * 1.15 + k * f.size * 1.25, ar ? 'right' : 'left', ST, f.size, hl && l.includes(hl) ? hl : ''));
-      qa.contrast.push(contrast(lum(ST), lum(SC)));
-      const fz = readable(W * 0.4, H - BOT - W * 0.04, W * 0.6 - P, W * 0.05, '#FFFFFF');
-      if (footer) { const fs2 = Math.round(W * 0.024); used(fs2); ctx.font = `600 ${fs2}px "${bf}", sans-serif`; ctx.direction = 'ltr'; ctx.textAlign = 'right'; ctx.fillStyle = fz.color; ctx.fillText(footer, W - P, H - BOT); }
+    },
+    bottom: (dy, scrim) => {
+      const hl0 = fitText(ctx, sl.headline, hf, 700, W - P * 2, Math.round(W * 0.078 * scale), 3);
+      const subH = sl.sub ? W * 0.04 * 3 : 0; const ctaH = sl.cta ? W * 0.08 : 0;
+      let y = H - resBot - ctaH - subH - (hl0.lines.length - 1) * hl0.size * 1.22 + dy;
+      if (scrim) scrim();
+      if (!DRY) qa.contrast.push(contrast(1, regionLum(ctx, P, y - hl0.size, W - P * 2, hl0.size * 2)));
+      y = head(sl.headline, '#FFFFFF', xA, y, W - P * 2, W * 0.078, 3, al);
+      y = para(sl.sub, 'rgba(255,255,255,.9)', xA, y + W * 0.045, W - P * 2, W * 0.036, 2, al);
+      pill(sl.cta, xA, y + W * 0.03, al);
+    },
+    card: (dy) => {
+      const cw = W * 0.82; const cx = (W - cw) / 2;
+      const hl0 = fitText(ctx, sl.headline, hf, 700, cw - P * 1.4, Math.round(W * 0.066 * scale), 3);
+      const ch = P * 1.4 + hl0.lines.length * hl0.size * 1.22 + (sl.sub ? W * 0.12 : 0) + (sl.cta ? W * 0.1 : 0);
+      const cy = (H - ch) / 2 + dy;
+      mark(cy, cy + ch);
+      if (!DRY) { ctx.save(); ctx.shadowColor = 'rgba(0,0,0,.18)'; ctx.shadowBlur = 40; ctx.fillStyle = 'rgba(255,255,255,.94)'; rr(ctx, cx, cy, cw, ch, W * 0.035); ctx.fill(); ctx.restore(); qa.contrast.push(contrast(lum('#0A0A0A'), lum('#F2F2F2'))); }
+      let y = head(sl.headline, '#0A0A0A', W / 2, cy + P * 0.7 + hl0.size, cw - P * 1.4, W * 0.066, 3, 'center');
+      y = para(sl.sub, '#404040', W / 2, y + W * 0.045, cw - P * 1.4, W * 0.032, 2, 'center');
+      pill(sl.cta, W / 2, y + W * 0.03, 'center');
+    },
+  };
+  if (block[t]) {
+    drawCover(ctx, bg, 0, 0, W, H);
+    logoAt = { mono: 'tl', glow: 'tc', street: 'bl' }[t] || null;
+    if (t === 'glow') { ctx.save(); [[0.12, 0.2, 0.05], [0.9, 0.34, 0.035], [0.84, 0.78, 0.028]].slice(0, 2 + (i % 2)).forEach(([cx, cy, r]) => { const g = ctx.createRadialGradient(W * cx, H * cy, 0, W * cx, H * cy, W * r * 2.2); g.addColorStop(0, 'rgba(255,255,255,.55)'); g.addColorStop(1, 'rgba(255,255,255,0)'); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(W * cx, H * cy, W * r * 2.2, 0, 7); ctx.fill(); }); ctx.restore(); }
+    // 1) measure the block at its default place, 2) move it to the calmest band (away from the product), 3) draw.
+    DRY = true; box = null; block[t](0); DRY = false;
+    let dy = 0;
+    if (box && bg) {
+      const h = box[1] - box[0];
+      const minDy = resTop - box[0]; const maxDy = H - resBot - box[1];
+      const pos = d.textPos || 'auto';
+      const map = busyRows(canvas, W, H);
+      if (pos === 'top') dy = minDy;
+      else if (pos === 'bottom') dy = maxDy;
+      else if (pos === 'center') dy = (H - h) / 2 - box[0];
+      else if (map && maxDy >= minDy) {
+        let best = map.band(box[0], box[1]) * 0.92; // small preference for the template's own place
+        for (let k = 0; k <= 40; k++) {
+          const cand = minDy + (maxDy - minDy) * k / 40;
+          const sc = map.band(box[0] + cand, box[1] + cand) + Math.abs(cand) / H * map.median * 0.25;
+          if (sc < best) { best = sc; dy = cand; }
+        }
+      }
+      dy = Math.max(Math.min(dy, Math.max(maxDy, 0)), Math.min(minDy, 0));
+      if (map) qa.busy = map.band(box[0] + dy, box[1] + dy) / Math.max(1e-6, map.median);
+    }
+    box = null;
+    if (t === 'bottom') {
+      block.bottom(dy, () => {
+        // scrim follows the text: dark gradient fading away from the text block
+        DRY = true; box = null; block.bottom(dy); DRY = false;
+        const [a, b2] = box; const lower = (a + b2) / 2 > H / 2;
+        const g = lower ? ctx.createLinearGradient(0, a - H * 0.2, 0, Math.min(H, b2 + P * 1.5)) : ctx.createLinearGradient(0, Math.min(H, b2 + H * 0.2), 0, Math.max(0, a - P * 1.5));
+        g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,.74)');
+        ctx.fillStyle = g; lower ? ctx.fillRect(0, a - H * 0.2, W, H - (a - H * 0.2)) : ctx.fillRect(0, 0, W, b2 + H * 0.2);
+      });
+    } else block[t](dy);
+    // fixed frame: footer
+    if (footer) {
+      if (t === 'glow') drawFooter('pill');
+      else if (t === 'street') { const fz = readable(W * 0.4, H - BOT - W * 0.04, W * 0.6 - P, W * 0.05, '#FFFFFF'); const fs2 = Math.round(W * 0.024); used(fs2); ctx.font = `600 ${fs2}px "${bf}", sans-serif`; ctx.direction = 'ltr'; ctx.textAlign = 'right'; ctx.fillStyle = fz.color; ctx.fillText(footer, W - P, H - BOT); }
+      else { const fz = readable(P, H - BOT - W * 0.04, W * 0.45, W * 0.05, '#FFFFFF'); drawFooter('text', fz.color); }
     }
   } else if (t === 'split') {
     const land = W > H;
@@ -2875,42 +3051,23 @@ async function renderSlide(canvas, d, sl, i, n) {
     pill(sl.cta, x0, y + W * 0.04, 'right', true);
   } else {
     drawCover(ctx, bg, 0, 0, W, H);
-    if (t === 'bottom') {
-      const g = ctx.createLinearGradient(0, H * 0.38, 0, H); g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,.78)');
-      ctx.fillStyle = g; ctx.fillRect(0, H * 0.38, W, H * 0.62);
-      const hl0 = fitText(ctx, sl.headline, hf, 700, W - P * 2, Math.round(W * 0.078 * scale), 3);
-      const subH = sl.sub ? W * 0.04 * 3 : 0; const ctaH = sl.cta ? W * 0.08 : 0;
-      let y = H - BOT - ctaH - subH - (hl0.lines.length - 1) * hl0.size * 1.22;
-      qa.contrast.push(contrast(1, regionLum(ctx, P, y - hl0.size, W - P * 2, hl0.size * 2)));
-      y = head(sl.headline, '#FFFFFF', W - P, y, W - P * 2, W * 0.078, 3);
-      y = para(sl.sub, 'rgba(255,255,255,.88)', W - P, y + W * 0.045, W - P * 2, W * 0.036, 2);
-      pill(sl.cta, W - P, y + W * 0.03);
-    } else if (t === 'top') {
+    if (t === 'top') {
       const bandH = H * (W > H ? 0.42 : 0.34);
       ctx.fillStyle = C; ctx.fillRect(0, 0, W, bandH);
       qa.contrast.push(contrast(lum(CT), lum(C)));
       const y = head(sl.headline, CT, W - P, TOP + W * 0.08 + (d.showLogo && d.logoPos !== 'bottom' ? W * 0.02 : 0), W - P * 2 - (d.showLogo ? W * 0.16 : 0), W * 0.07, 2);
       para(sl.sub, CT, W - P, y + W * 0.045, W - P * 2, W * 0.034, 2);
       pill(sl.cta, W - P, H - BOT - W * 0.075);
-    } else if (t === 'card') {
-      const cw = W * 0.82; const cx = (W - cw) / 2;
-      const hl0 = fitText(ctx, sl.headline, hf, 700, cw - P * 1.4, Math.round(W * 0.066 * scale), 3);
-      const ch = P * 1.4 + hl0.lines.length * hl0.size * 1.22 + (sl.sub ? W * 0.12 : 0) + (sl.cta ? W * 0.1 : 0);
-      const cy = (H - ch) / 2;
-      ctx.save(); ctx.shadowColor = 'rgba(0,0,0,.18)'; ctx.shadowBlur = 40; ctx.fillStyle = 'rgba(255,255,255,.94)'; rr(ctx, cx, cy, cw, ch, W * 0.035); ctx.fill(); ctx.restore();
-      qa.contrast.push(contrast(lum('#0A0A0A'), lum('#F2F2F2')));
-      let y = head(sl.headline, '#0A0A0A', W / 2, cy + P * 0.7 + hl0.size, cw - P * 1.4, W * 0.066, 3, 'center');
-      y = para(sl.sub, '#404040', W / 2, y + W * 0.045, cw - P * 1.4, W * 0.032, 2, 'center');
-      pill(sl.cta, W / 2, y + W * 0.03, 'center');
     }
-    if (footer && t !== 'clean') { const fz = readable(P, H - BOT - W * 0.04, W * 0.45, W * 0.05, '#FFFFFF'); if (t !== 'bottom' || !sl.cta) drawFooter('text', fz.color); }
+    if (footer && t !== 'clean') { const fz = readable(P, H - BOT - W * 0.04, W * 0.45, W * 0.05, '#FFFFFF'); drawFooter('text', fz.color); }
   }
+  ctx = main;
   if (logo) {
-    const lw = W * 0.15; const lh = Math.min((logo.height / logo.width) * lw, W * 0.15);
-    const lw2 = (logo.width / logo.height) * lh;
+    const lh0 = W * 0.13; const lw0 = W * 0.2;
+    const r = Math.min(lw0 / logo.width, lh0 / logo.height); const lw2 = logo.width * r; const lh = logo.height * r;
     const pos = logoAt || (d.logoPos === 'right' ? 'tr' : d.logoPos === 'bottom' ? 'bl' : 'tl');
     const lx = pos === 'tc' ? (W - lw2) / 2 : pos === 'tr' ? W - P - lw2 : P; const ly = pos === 'bl' ? H - BOT - lh : TOP;
-    if (d.logoPlate) { ctx.fillStyle = 'rgba(255,255,255,.92)'; rr(ctx, lx - lw2 * 0.08, ly - lw2 * 0.08, lw2 * 1.16, lh + lw2 * 0.16, lw2 * 0.08); ctx.fill(); }
+    if (d.logoPlate) { ctx.fillStyle = 'rgba(255,255,255,.92)'; rr(ctx, lx - lh * 0.12, ly - lh * 0.12, lw2 + lh * 0.24, lh * 1.24, lh * 0.14); ctx.fill(); }
     ctx.drawImage(logo, lx, ly, lw2, lh);
   }
   if (n > 1 && !d.noCounter) {
@@ -2929,6 +3086,7 @@ function qaList(qa, sl) {
   out.push([qa.highlight === 1 || !sl.highlight ? Boolean(sl.highlight) : false, sl.highlight ? (qa.highlight ? 'كلمة مميّزة واحدة في مربع' : 'الكلمة المميّزة غير موجودة في العنوان') : 'لا توجد كلمة مميّزة']);
   const cr = qa.contrast.length ? Math.min(...qa.contrast) : 21;
   out.push([cr >= 4.5, `تباين النص ${cr.toFixed(1)}:1 (4.5 على الأقل)`]);
+  if (qa.busy != null) out.push([qa.busy < 1.25, qa.busy < 1.25 ? 'النص في منطقة هادئة (لا يغطي المنتج)' : 'النص فوق منطقة مزدحمة: جرّب «مكان النص» أو خلفية أخرى']);
   out.push([qa.minFont >= 22 || qa.minFont === 999, `أصغر نص ${qa.minFont === 999 ? '—' : Math.round(qa.minFont)}px (22 على الأقل)`]);
   if (/(يعالج|علاج|يشفي|شفاء|يقضي على|cure|heal)/i.test(`${sl.headline} ${sl.sub}`)) out.push([false, 'ادعاء علاجي: خفّفه (يساعد، يمنح إحساساً…)']);
   return out;
@@ -2968,6 +3126,7 @@ function designer(opts = {}) {
         <span class="lbl" style="margin-top:0">النمط والقالب</span><div class="opts" id="dzt">${DTPL.map(([k, l]) => `<button class="opt ${d.template === k ? 'on' : ''}" data-t="${k}">${ARCHS.includes(k) ? '✦ ' : ''}${l}</button>`).join('')}</div>
         <p class="hint mt8" id="dzth">${ARCH_L[d.template] ? esc(ARCH_L[d.template][1]) : ''}</p>
         <span class="lbl">المقاس</span><div class="opts" id="dza">${[['1:1', 'مربع'], ['4:5', 'عمودي'], ['9:16', 'ستوري'], ['16:9', 'عرضي']].map(([k, l]) => `<button class="opt ${d.aspect === k ? 'on' : ''}" data-a="${k}">${l}</button>`).join('')}</div>
+        <span class="lbl">مكان النص</span><div class="opts" id="dzpos">${[['auto', 'تلقائي (بعيداً عن المنتج)'], ['top', 'أعلى'], ['center', 'وسط'], ['bottom', 'أسفل']].map(([k, l]) => `<button class="opt ${(d.textPos || 'auto') === k ? 'on' : ''}" data-pos="${k}">${l}</button>`).join('')}</div>
         <div class="flex mt12"><span class="lbl grow" style="margin:0">النصوص <span class="muted xs" id="dzn"></span></span><button class="btn ghost sm" id="dzcopy" data-busy="يكتب…">${ic('sparkle')}اكتبها لي</button></div>
         <input class="field mt8" id="dzh" placeholder="العنوان الكبير (4 إلى 8 كلمات)">
         <input class="field mt8" id="dzhl" placeholder="الكلمة المميّزة: كلمة واحدة من العنوان تظهر داخل مربع ملوّن">
@@ -3014,6 +3173,7 @@ function designer(opts = {}) {
     $('[data-x]', m).onclick = closeModal;
     let to;
     $$('[data-t]', m).forEach((x) => (x.onclick = () => { d.template = x.dataset.t; $('#dzth', m).textContent = ARCH_L[d.template]?.[1] || ''; $$('[data-t]', m).forEach((y) => y.classList.toggle('on', y === x)); draw(); }));
+    $$('[data-pos]', m).forEach((x) => (x.onclick = () => { d.textPos = x.dataset.pos; $$('[data-pos]', m).forEach((y) => y.classList.toggle('on', y === x)); draw(); }));
     $$('[data-ac]', m).forEach((x) => (x.onclick = () => { d.accent = x.dataset.ac; $$('[data-ac]', m).forEach((y) => y.classList.toggle('on', y === x)); draw(); }));
     $('#dzfoot', m).oninput = (e) => { d.footer = e.target.value.slice(0, 60); clearTimeout(to); to = setTimeout(draw, 150); };
     $('#dzcap', m).oninput = (e) => { sl().caption = e.target.value; };
