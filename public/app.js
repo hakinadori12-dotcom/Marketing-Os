@@ -3020,8 +3020,10 @@ async function renderSlide(canvas, d, sl, i, n) {
     return ph;
   };
   // Text colour that reads best on the photo region; soft scrim (never on the product) when under 4.5:1.
-  let PZ = null;
-  const clipOut = () => { ctx.beginPath(); ctx.rect(0, 0, W, H); if (PZ) { ctx.moveTo(PZ.x0, PZ.y0); ctx.lineTo(PZ.x0, PZ.y1); ctx.lineTo(PZ.x1, PZ.y1); ctx.lineTo(PZ.x1, PZ.y0); ctx.closePath(); } ctx.clip('evenodd'); };
+  let PZ = null; let PZS = null;
+  const zones = () => (PZS && PZS.length ? PZS : PZ ? [PZ] : []);
+  const hitPZ = (r) => zones().reduce((t, z) => t + hitRect(r, z), 0);
+  const clipOut = () => { ctx.beginPath(); ctx.rect(0, 0, W, H); for (const z of zones()) { ctx.moveTo(z.x0, z.y0); ctx.lineTo(z.x0, z.y1); ctx.lineTo(z.x1, z.y1); ctx.lineTo(z.x1, z.y0); ctx.closePath(); } ctx.clip('evenodd'); };
   const readable = (r, prefer) => {
     if (DRY) return { color: prefer || '#FFFFFF', cr: 21 };
     const L = regionLum(ctx, r.x0, r.y0, r.x1 - r.x0, r.y1 - r.y0);
@@ -3111,6 +3113,7 @@ async function renderSlide(canvas, d, sl, i, n) {
       qa.composite = true;
     } else if (sl.pz) {
       PZ = { x0: sl.pz.x0 * W - GAP, y0: sl.pz.y0 * H - GAP, x1: sl.pz.x1 * W + GAP, y1: sl.pz.y1 * H + GAP };
+      if (Array.isArray(sl.pz.boxes) && sl.pz.boxes.length) PZS = sl.pz.boxes.map((q) => ({ x0: q.x0 * W - GAP, y0: q.y0 * H - GAP, x1: q.x1 * W + GAP, y1: q.y1 * H + GAP }));
     } else {
       sal = bg ? saliency(canvas, W, H) : null;
       PZ = sal?.subject ? { x0: sal.subject.x0 - GAP, y0: sal.subject.y0 - GAP, x1: sal.subject.x1 + GAP, y1: sal.subject.y1 + GAP } : null;
@@ -3119,16 +3122,16 @@ async function renderSlide(canvas, d, sl, i, n) {
     // logo + footer: fixed corners, moved to another corner only if they would touch the product
     if (logoR) {
       const at = (p2) => { const x = p2 === 'tc' ? (W - logoR.w) / 2 : p2[1] === 'r' ? W - P - logoR.w : P; const y = p2[0] === 'b' ? H - BOT - logoR.h : TOP; return { x0: x, y0: y, x1: x + logoR.w, y1: y + logoR.h }; };
-      let r = at(logoR.pos); if (hitRect(r, PZ)) { const alt = ['tl', 'tr', 'tc', 'bl', 'br'].map(at).find((q) => !hitRect(q, PZ)); if (alt) r = alt; }
+      let r = at(logoR.pos); if (hitPZ(r)) { const alt = ['tl', 'tr', 'tc', 'bl', 'br'].map(at).find((q) => !hitPZ(q)); if (alt) r = alt; }
       logoR.r = r;
     }
     if (footer) {
       ctx.font = `600 ${Math.round(W * 0.024)}px "${bf}", sans-serif`; const fw = ctx.measureText(footer).width + W * 0.05; const fh = W * 0.05;
       const opts = t === 'glow' ? [{ x0: (W - fw) / 2, y0: H - BOT - fh, x1: (W + fw) / 2, y1: H - BOT, kind: 'pill' }] : [];
       opts.push({ x0: P, y0: H - BOT - fh, x1: P + fw, y1: H - BOT, kind: 'left' }, { x0: W - P - fw, y0: H - BOT - fh, x1: W - P, y1: H - BOT, kind: 'right' });
-      footR = opts.find((q) => !hitRect(q, PZ) && !hitRect(q, logoR?.r)) || null;
+      footR = opts.find((q) => !hitPZ(q) && !hitRect(q, logoR?.r)) || null;
     }
-    if (t === 'glow') { ctx.save(); [[0.12, 0.2, 0.05], [0.9, 0.34, 0.035], [0.84, 0.78, 0.028]].slice(0, 2 + (i % 2)).forEach(([cx, cy, r]) => { const R = W * r * 2.2; if (hitRect({ x0: W * cx - R, y0: H * cy - R, x1: W * cx + R, y1: H * cy + R }, PZ)) return; const g = ctx.createRadialGradient(W * cx, H * cy, 0, W * cx, H * cy, R); g.addColorStop(0, 'rgba(255,255,255,.55)'); g.addColorStop(1, 'rgba(255,255,255,0)'); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(W * cx, H * cy, R, 0, 7); ctx.fill(); }); ctx.restore(); }
+    if (t === 'glow') { ctx.save(); [[0.12, 0.2, 0.05], [0.9, 0.34, 0.035], [0.84, 0.78, 0.028]].slice(0, 2 + (i % 2)).forEach(([cx, cy, r]) => { const R = W * r * 2.2; if (hitPZ({ x0: W * cx - R, y0: H * cy - R, x1: W * cx + R, y1: H * cy + R })) return; const g = ctx.createRadialGradient(W * cx, H * cy, 0, W * cx, H * cy, R); g.addColorStop(0, 'rgba(255,255,255,.55)'); g.addColorStop(1, 'rgba(255,255,255,0)'); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(W * cx, H * cy, R, 0, 7); ctx.fill(); }); ctx.restore(); }
     // candidate zones (layout library), clipped by the logo and footer
     const Zs = layoutZones(d.aspect, ar);
     const want = forced || (sl.layout && sl.layout !== 'auto' ? sl.layout : d.layout && d.layout !== 'auto' ? d.layout : '');
@@ -3148,11 +3151,11 @@ async function renderSlide(canvas, d, sl, i, n) {
         let dy0 = Z.valign === 'center' ? (Z.y0 + Z.y1) / 2 - (box.y0 + box.y1) / 2 : 0;
         if (box.y1 + dy0 > resBot && h < resBot - resTop) dy0 -= box.y1 + dy0 - resBot;
         // slide vertically (inside the safe area) to the nearest place that clears the product zone
-        let dy = dy0; let ov = hitRect({ x0: box.x0, y0: box.y0 + dy0, x1: box.x1, y1: box.y1 + dy0 }, PZ);
-        if (ov && PZ) {
+        let dy = dy0; let ov = hitPZ({ x0: box.x0, y0: box.y0 + dy0, x1: box.x1, y1: box.y1 + dy0 });
+        if (ov && zones().length) {
           const lo = resTop - box.y0; const hi = resBot - box.y1;
           for (let k = 0, bestD = Infinity; k <= 48 && hi >= lo; k++) {
-            const cand = lo + (hi - lo) * k / 48; const o2 = hitRect({ x0: box.x0, y0: box.y0 + cand, x1: box.x1, y1: box.y1 + cand }, PZ);
+            const cand = lo + (hi - lo) * k / 48; const o2 = hitPZ({ x0: box.x0, y0: box.y0 + cand, x1: box.x1, y1: box.y1 + cand });
             if (!o2 && Math.abs(cand - dy0) < bestD) { bestD = Math.abs(cand - dy0); dy = cand; ov = 0; }
           }
         }
@@ -3171,7 +3174,7 @@ async function renderSlide(canvas, d, sl, i, n) {
       DRY = true; box = null; compose(pick.Z, pick.dy); DRY = false;
       compose(pick.Z, pick.dy);
       box = null; DRY = true; compose(pick.Z, pick.dy); DRY = false;
-      qa.overlap = PZ ? Boolean(hitRect(box, PZ)) : null;
+      qa.overlap = zones().length ? Boolean(hitPZ(box)) : null;
     }
     // footer + logo
     if (footR) {
@@ -3180,7 +3183,7 @@ async function renderSlide(canvas, d, sl, i, n) {
       else { const fz = readable(footR, '#FFFFFF'); ctx.fillStyle = fz.color; ctx.textAlign = footR.kind; ctx.fillText(footer, footR.kind === 'left' ? footR.x0 : footR.x1, H - BOT); }
     }
     if (logoR?.r) { const r = logoR.r; if (d.logoPlate) { ctx.fillStyle = 'rgba(255,255,255,.92)'; rr(ctx, r.x0 - logoR.h * 0.12, r.y0 - logoR.h * 0.12, logoR.w + logoR.h * 0.24, logoR.h * 1.24, logoR.h * 0.14); ctx.fill(); } ctx.drawImage(logo, r.x0, r.y0, logoR.w, logoR.h); }
-    if (d.showZone && PZ && canvas.dataset.preview) { ctx.save(); ctx.setLineDash([W * 0.012, W * 0.008]); ctx.lineWidth = W * 0.004; ctx.strokeStyle = qa.overlap ? '#F59E0B' : '#22C55E'; ctx.strokeRect(PZ.x0, PZ.y0, PZ.x1 - PZ.x0, PZ.y1 - PZ.y0); ctx.restore(); }
+    if (d.showZone && zones().length && canvas.dataset.preview) { ctx.save(); ctx.setLineDash([W * 0.012, W * 0.008]); ctx.lineWidth = W * 0.004; ctx.strokeStyle = qa.overlap ? '#F59E0B' : '#22C55E'; for (const z of zones()) ctx.strokeRect(z.x0, z.y0, z.x1 - z.x0, z.y1 - z.y0); ctx.restore(); }
   } else {
     // fixed templates (split / top band / clean)
     const side = 'right';
@@ -3347,6 +3350,7 @@ function designer(opts = {}) {
       if (qa.composite && sl().bgLayout && sl().bgLayout !== qa.layout) ql.push([false, `الخلفية صُممت لتخطيط ${sl().bgLayout}: أعد «صمّم الخلفية» حتى تتطابق المنصة مع مكان المنتج`]);
       if (qa.composite) ql.unshift([true, 'صورة المنتج الحقيقية في مكانها المحدد']);
       if (sl().full && sl().textBy === 'platform') ql.unshift([true, 'التصميم كامل بالذكاء الاصطناعي · النص العربي بخط البراند (حروف صحيحة 100%)']);
+      if (sl().full && sl().model) ql.push([true, `النموذج: ${sl().model}`]);
       const needFix = qa.full && sl().textCheck && !sl().textCheck.ok;
       $('#dzqa', m).innerHTML = `${needFix ? `<button class="btn grey sm" id="dzfix" style="float:left">${ic('edit')}صحّح النص</button>` : ''}<b class="xs">فحص الجودة ${ql.every((x) => x[0]) ? chip('ممتاز', 'em', false) : chip(`${ql.filter((x) => !x[0]).length} ملاحظة`, 'am', false)}</b>${ql.map(([ok2, tx]) => `<div class="xs mt8" style="color:${ok2 ? 'var(--text-2)' : '#D97706'}">${ok2 ? '✓' : '⚠'} ${esc(tx)}</div>`).join('')}`;
       cv.width = c.width; cv.height = c.height; cv.getContext('2d').drawImage(c, 0, 0);
@@ -3393,7 +3397,7 @@ function designer(opts = {}) {
       if (d.mode === 'full') {
         if (!s2.headline.trim()) throw new Error('اكتب العنوان أولاً أو اضغط «اكتبها لي»');
         const img = await fullPostAuto(b, d, s2, prod, opts.from, (t) => busyOn(t));
-        Object.assign(s2, { bg: img.url, full: true, textBy: img.textBy, pz: img.subject || null, composite: false, textCheck: img.textCheck || null, fullSig: fullSig(s2), layout: img.layout || s2.layout });
+        Object.assign(s2, { bg: img.url, full: true, model: img.model, textBy: img.textBy, pz: img.subject || null, composite: false, textCheck: img.textCheck || null, fullSig: fullSig(s2), layout: img.layout || s2.layout });
         S.images = null;
         if (img.textCheck && !img.textCheck.ok) toast('الذكاء الاصطناعي لم يكتب النص بشكل صحيح. أعد التوليد، أو استعمل «خلفية + نص المنصة».', true);
         return;
