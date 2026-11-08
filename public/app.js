@@ -1928,17 +1928,18 @@ drawCampaigns = ((f) => (...a) => (S.page === 'studio' && S.stab === 'campaign' 
 function drawStudio() {
   const g = S.img;
   const b = S.brand;
-  g.kind = g.kind || 'post'; g.slides = g.slides || 5; g.aspect = g.aspect || '4:5';
+  g.kind = g.kind || 'post'; g.slides = g.slides || 5; g.aspect = g.aspect || '4:5'; g.mode = g.mode || 'full';
   const prods = b.products.filter((p) => p.kind !== 'service');
   const v = view(`${studioTabs()}<div class="grid c12">
-    <div class="card s5"><div class="card-h"><h3>تصميم جديد</h3><div class="end"><span class="muted xs">خلفية بالذكاء الاصطناعي + نصوصك وشعارك بخط البراند</span></div></div>
-      <span class="lbl" style="margin-top:0">نوع التصميم</span><div class="opts" data-opts="kind">${[['post', 'منشور'], ['carousel', 'كاروسيل'], ['story', 'ستوري'], ['ad', 'إعلان']].map(([k, l]) => `<button class="opt ${g.kind === k ? 'on' : ''}" data-k="${k}">${l}</button>`).join('')}</div>
+    <div class="card s5"><div class="card-h"><h3>تصميم جديد</h3><div class="end"><span class="muted xs">${g.mode === 'full' ? 'منشور كامل بالذكاء الاصطناعي حسب دليل التصميم' : 'خلفية بالذكاء الاصطناعي + نصوصك بخط البراند'}</span></div></div>
+      <span class="lbl" style="margin-top:0">طريقة التصميم</span><div class="opts" data-opts="mode">${[['full', '✦ صورة كاملة بالذكاء الاصطناعي'], ['overlay', 'خلفية + نص المنصة']].map(([k, l]) => `<button class="opt ${g.mode === k ? 'on' : ''}" data-k="${k}">${l}</button>`).join('')}</div>
+      <span class="lbl">نوع التصميم</span><div class="opts" data-opts="kind">${[['post', 'منشور'], ['carousel', 'كاروسيل'], ['story', 'ستوري'], ['ad', 'إعلان']].map(([k, l]) => `<button class="opt ${g.kind === k ? 'on' : ''}" data-k="${k}">${l}</button>`).join('')}</div>
       ${g.kind === 'carousel' ? `<span class="lbl">عدد الشرائح</span><div class="opts" data-opts="slides">${[3, 4, 5, 6, 7, 8, 10].map((n) => `<button class="opt ${g.slides === n ? 'on' : ''}" data-k="${n}">${n}</button>`).join('')}</div>` : ''}
       ${g.kind !== 'story' ? `<span class="lbl">المقاس</span>${pills('aspect', [['1:1', 'مربع 1:1'], ['4:5', 'عمودي 4:5'], ['16:9', 'عرضي 16:9']], g.aspect)}` : ''}
       ${prods.length ? `<span class="lbl">المنتج في التصميم</span><div class="sel"><button class="sel-btn" id="iprod" data-menu><span class="lab">${(() => { const p = prods.find((x) => x.id === g.productId); return p ? `${p.photo ? `<img src="${esc(p.photo)}" alt="" style="width:22px;height:22px;border-radius:6px;object-fit:cover;vertical-align:middle;margin-inline-end:6px">` : ''}${esc(p.name)}` : 'بدون منتج محدد'; })()}</span>${ic('chev')}</button></div>` : ''}
       <span class="lbl">الفكرة</span>
       <textarea class="field" id="ip" data-mic data-enhance="content" rows="4" maxlength="2000" placeholder="مثلاً: عرض الجمعة البيضاء على قناع الكولاجين، نركّز على النتيجة الصباحية">${esc(g.prompt)}</textarea>
-      <p class="hint mt8">الذكاء الاصطناعي يكتب العنوان والنص والدعوة للإجراء ويصمم الخلفية، ثم تعدّل كل شيء في المصمم قبل الحفظ.</p>
+      <p class="hint mt8">${g.mode === 'full' ? 'الذكاء الاصطناعي يكتب العنوان والنص والدعوة للإجراء، ثم يصمم المنشور كاملاً في صورة واحدة: المشهد + منتجك الحقيقي + النص + الشعار، حسب التخطيط والقاعدة الذهبية، ثم نتحقق من النص ونصححه.' : 'الذكاء الاصطناعي يكتب النصوص ويصمم الخلفية، والمنصة تكتب النص بخط براندك (حروف مضمونة 100%).'}</p>
       <div class="flex mt16" style="justify-content:flex-end"><button class="btn ghost" id="iblank">${ic('edit')}مصمم فارغ</button><button class="btn primary" id="igo" data-busy="يحضّر التصميم…">${ic('sparkle')}صمّم</button></div>
     </div>
     <div class="card s7"><div class="card-h"><h3>معرض ${esc(b.name)}</h3><div class="end"><span class="muted xs">${S.images.length}</span></div></div>
@@ -1954,20 +1955,22 @@ function drawStudio() {
     </div></div>`);
   bindOpts(v, g);
   $$('[data-opts="kind"] .opt', v).forEach((x) => x.addEventListener('click', () => drawStudio()));
+  $$('[data-opts="mode"] .opt', v).forEach((x) => x.addEventListener('click', () => drawStudio()));
   $$('[data-opts="slides"] .opt', v).forEach((x) => x.addEventListener('click', () => (g.slides = Number(x.dataset.k))));
   $('#ip', v).oninput = (e) => (g.prompt = e.target.value);
   $('#iprod', v) && ($('#iprod', v).onclick = () => openMenu($('#iprod', v), [{ label: 'بدون منتج محدد', selected: !g.productId, onClick: () => { g.productId = ''; drawStudio(); } }, ...prods.map((p) => ({ label: p.name, desc: p.photo ? (p.price || 'صورة المنتج جاهزة') : 'ينقصه صورة', selected: g.productId === p.id, onClick: () => { g.productId = p.id; drawStudio(); } }))]));
   const aspect = () => (g.kind === 'story' ? '9:16' : g.aspect);
   const n = () => (g.kind === 'carousel' ? g.slides : 1);
   const onSave = (items) => { S.images = [...items, ...(S.images || [])]; S.ov = null; drawStudio(); };
-  $('#iblank', v).onclick = () => designer({ aspect: aspect(), productId: g.productId, slides: Array.from({ length: n() }, () => ({ prompt: g.prompt })), onSave, idea: g.prompt });
+  $('#iblank', v).onclick = () => designer({ aspect: aspect(), design: { mode: g.mode }, productId: g.productId, slides: Array.from({ length: n() }, () => ({ prompt: g.prompt })), onSave, idea: g.prompt });
   $('#igo', v).onclick = (e) => busy(e.currentTarget, async () => {
     if (!g.prompt.trim()) return toast('اكتب الفكرة أولاً', true);
     const sp = prods.find((x) => x.id === g.productId);
     if (sp && !sp.photo) return productPhotoModal(sp, () => drawStudio());
     try {
-      const r = await api(`/api/brands/${b.id}/design/copy`, { method: 'POST', body: { idea: `${g.kind === 'ad' ? 'Paid ad. ' : ''}${g.prompt}`, productId: g.productId, slides: n(), ai: aiOf('text') } });
-      designer({ aspect: aspect(), productId: g.productId, slides: r.slides, onSave, idea: g.prompt, auto: true, template: g.kind === 'story' ? 'bottom' : g.kind === 'ad' ? 'split' : 'bottom' });
+      const arch = autoArch(b);
+      const r = await api(`/api/brands/${b.id}/design/copy`, { method: 'POST', body: { idea: `${g.kind === 'ad' ? 'Paid ad. ' : ''}${g.prompt}`, productId: g.productId, slides: n(), style: g.mode === 'full' ? arch : undefined, ai: aiOf('text') } });
+      designer({ aspect: aspect(), productId: g.productId, slides: r.slides, onSave, idea: g.prompt, auto: true, design: { mode: g.mode }, template: g.mode === 'full' ? arch : g.kind === 'ad' ? 'split' : 'bottom' });
     } catch (err) { toast(err.message, true); }
   });
   $$('[data-des]', v).forEach((x) => (x.onclick = () => {
