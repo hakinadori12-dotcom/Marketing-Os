@@ -441,6 +441,7 @@ module.exports = async (req, res) => {
       if (sub === 'identity/logos' && method === 'POST') return send(res, 200, await identity.logos(id, await readBody(req)));
       if (sub === 'enhance' && method === 'POST') { const body = await readBody(req); return send(res, 200, { text: await content.enhanceText(id, body.text, String(body.kind || 'content')) }); }
       if (sub === 'voice/script' && method === 'POST') return send(res, 200, await content.voiceScript(id, await readBody(req)));
+      if (sub === 'images/full' && method === 'POST') return send(res, 200, await content.fullPost(id, await readBody(req)));
       if (sub === 'campaigns' && method === 'GET') return send(res, 200, { campaigns: await content.listCampaigns(id), styles: Object.fromEntries(Object.entries(content.ARCH).map(([k, v]) => [k, { name: v.name, about: v.about }])) });
       if (sub === 'campaigns' && method === 'POST') return send(res, 200, await content.makeCampaign(id, await readBody(req)));
       const cpm = sub && sub.match(/^campaigns\/([a-z0-9]+)$/);
